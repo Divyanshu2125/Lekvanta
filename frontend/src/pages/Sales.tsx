@@ -18,6 +18,7 @@ import {
   Download,
   AlertTriangle,
   RotateCcw,
+  Zap,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -43,13 +44,25 @@ export default function Sales() {
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isQuickBillMode, setIsQuickBillMode] = useState(false);
+  const [initialBillTab, setInitialBillTab] = useState<'products' | 'services'>('products');
   const [duplicateFromInvoice, setDuplicateFromInvoice] = useState<any | null>(null);
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<any | null>(null);
 
-  // Auto-open modal if navigating to /sales/new
+  // Auto-open modal if navigating to /sales/new, /sales/quick, or /sales/service
   useEffect(() => {
-    if (location.pathname.endsWith('/new')) {
+    if (location.pathname.endsWith('/service')) {
+      setInitialBillTab('services');
+      setIsQuickBillMode(false);
+      setIsCreateOpen(true);
+    } else if (location.pathname.endsWith('/quick')) {
+      setInitialBillTab('products');
+      setIsQuickBillMode(true);
+      setIsCreateOpen(true);
+    } else if (location.pathname.endsWith('/new')) {
+      setInitialBillTab('products');
+      setIsQuickBillMode(false);
       setIsCreateOpen(true);
     }
   }, [location.pathname]);
@@ -177,6 +190,8 @@ export default function Sales() {
 
   const getTypeBadge = (type: string) => {
     switch (type) {
+      case 'SERVICE':
+        return <span className="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded">🛠️ SERVICE</span>;
       case 'TAX_INVOICE':
         return <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded">GST INVOICE</span>;
       case 'BILL_OF_SUPPLY':
@@ -199,19 +214,47 @@ export default function Sales() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Sales & POS Billing</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            GST tax invoices, retail POS billing, estimates, quotations and customer receipts
+            GST tax invoices, retail POS billing, service jobs, estimates, quotations and customer receipts
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => {
               setDuplicateFromInvoice(null);
+              setInitialBillTab('services');
+              setIsQuickBillMode(false);
+              setIsCreateOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-3.5 py-2.5 rounded-xl transition-all shadow-sm hover:shadow"
+          >
+            <span>🛠️</span>
+            + Add Services
+          </button>
+
+          <button
+            onClick={() => {
+              setDuplicateFromInvoice(null);
+              setInitialBillTab('products');
+              setIsQuickBillMode(true);
+              setIsCreateOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm hover:shadow"
+          >
+            <Zap size={16} />
+            ⚡ Quick Bill
+          </button>
+
+          <button
+            onClick={() => {
+              setDuplicateFromInvoice(null);
+              setInitialBillTab('products');
+              setIsQuickBillMode(false);
               setIsCreateOpen(true);
             }}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm hover:shadow"
           >
             <Plus size={16} />
-            Create Invoice / Quick Bill
+            Create Bill
           </button>
         </div>
       </div>
@@ -284,6 +327,7 @@ export default function Sales() {
           <div className="flex items-center gap-1 overflow-x-auto w-full md:w-auto p-1 bg-slate-100 rounded-lg">
             {[
               { id: 'ALL', label: 'All Invoices' },
+              { id: 'SERVICE', label: '🛠️ Services' },
               { id: 'TAX_INVOICE', label: 'Tax Invoices' },
               { id: 'BILL_OF_SUPPLY', label: 'Bill of Supply' },
               { id: 'RETAIL', label: 'Retail' },
@@ -515,15 +559,23 @@ export default function Sales() {
       {isCreateOpen && (
         <InvoiceFormModal
           initialInvoice={duplicateFromInvoice}
+          isQuickBill={isQuickBillMode}
+          initialTab={initialBillTab}
           onClose={() => {
             setIsCreateOpen(false);
             setDuplicateFromInvoice(null);
-            if (location.pathname.endsWith('/new')) navigate('/sales', { replace: true });
+            setIsQuickBillMode(false);
+            if (location.pathname.endsWith('/new') || location.pathname.endsWith('/quick') || location.pathname.endsWith('/service')) {
+              navigate('/sales', { replace: true });
+            }
           }}
           onSaved={(savedInvoice, autoPrint) => {
             setIsCreateOpen(false);
             setDuplicateFromInvoice(null);
-            if (location.pathname.endsWith('/new')) navigate('/sales', { replace: true });
+            setIsQuickBillMode(false);
+            if (location.pathname.endsWith('/new') || location.pathname.endsWith('/quick') || location.pathname.endsWith('/service')) {
+              navigate('/sales', { replace: true });
+            }
             fetchInvoices();
             if (autoPrint && savedInvoice?.id) {
               setPrintInvoiceId(savedInvoice.id);

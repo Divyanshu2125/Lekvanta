@@ -1,4 +1,3 @@
-import { recentTransactions as defaultTransactions } from '@/lib/data';
 import { formatCurrency, cn } from '@/lib/utils';
 import { ArrowUpRight } from 'lucide-react';
 
@@ -24,7 +23,7 @@ interface Transaction {
 }
 
 export default function RecentTransactions({
-  transactions = defaultTransactions,
+  transactions = [],
 }: {
   transactions?: Transaction[];
 }) {

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../services/prisma';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 // ── Date Range / Financial Year Helper ────────────────────────────────────────
 
@@ -91,28 +92,28 @@ export const getGSTSalesRegister = asyncHandler(async (req: Request, res: Respon
   };
 
   const rows = invoices.map((inv) => {
-    totalTaxable += inv.subtotal;
-    totalCgst += inv.cgst;
-    totalSgst += inv.sgst;
-    totalIgst += inv.igst;
-    totalTax += inv.taxAmount;
-    totalAmount += inv.totalAmount;
+    totalTaxable += toNum(inv.subtotal);
+    totalCgst += toNum(inv.cgst);
+    totalSgst += toNum(inv.sgst);
+    totalIgst += toNum(inv.igst);
+    totalTax += toNum(inv.taxAmount);
+    totalAmount += toNum(inv.totalAmount);
 
     for (const it of inv.items) {
-      const rate = it.taxRate || 0;
+      const rate = toNum(it.taxRate);
       if (!rateSummary[rate]) {
         rateSummary[rate] = { taxable: 0, cgst: 0, sgst: 0, igst: 0, total: 0 };
       }
-      const itemTaxable = it.quantity * it.unitPrice;
+      const itemTaxable = toNum(it.quantity) * toNum(it.unitPrice);
       rateSummary[rate].taxable += itemTaxable;
-      rateSummary[rate].cgst += it.cgst;
-      rateSummary[rate].sgst += it.sgst;
-      rateSummary[rate].igst += it.igst;
-      rateSummary[rate].total += it.amount;
+      rateSummary[rate].cgst += toNum(it.cgst);
+      rateSummary[rate].sgst += toNum(it.sgst);
+      rateSummary[rate].igst += toNum(it.igst);
+      rateSummary[rate].total += toNum(it.amount);
     }
 
     const isB2B = Boolean(inv.customer?.gstin && inv.customer.gstin.trim().length === 15);
-    const isInterState = inv.igst > 0;
+    const isInterState = toNum(inv.igst) > 0;
 
     return {
       id: inv.id,
@@ -192,14 +193,14 @@ export const getGSTPurchaseRegister = asyncHandler(async (req: Request, res: Res
   let totalAmount = 0;
 
   const rows = bills.map((b) => {
-    totalTaxable += b.subtotal;
-    totalInputCgst += b.cgst;
-    totalInputSgst += b.sgst;
-    totalInputIgst += b.igst;
-    totalItc += b.taxAmount;
-    totalAmount += b.totalAmount;
+    totalTaxable += toNum(b.subtotal);
+    totalInputCgst += toNum(b.cgst);
+    totalInputSgst += toNum(b.sgst);
+    totalInputIgst += toNum(b.igst);
+    totalItc += toNum(b.taxAmount);
+    totalAmount += toNum(b.totalAmount);
 
-    const isInterState = b.igst > 0;
+    const isInterState = toNum(b.igst) > 0;
 
     return {
       id: b.id,
@@ -252,17 +253,17 @@ export const getGSTTaxSummary = asyncHandler(async (req: Request, res: Response)
   ]);
 
   // Output Tax (Sales)
-  const outputSalesTaxable = invoices.reduce((s, i) => s + i.subtotal, 0);
-  const outputCgst = invoices.reduce((s, i) => s + i.cgst, 0);
-  const outputSgst = invoices.reduce((s, i) => s + i.sgst, 0);
-  const outputIgst = invoices.reduce((s, i) => s + i.igst, 0);
+  const outputSalesTaxable = invoices.reduce((s, i) => s + toNum(i.subtotal), 0);
+  const outputCgst = invoices.reduce((s, i) => s + toNum(i.cgst), 0);
+  const outputSgst = invoices.reduce((s, i) => s + toNum(i.sgst), 0);
+  const outputIgst = invoices.reduce((s, i) => s + toNum(i.igst), 0);
   const totalOutputTax = outputCgst + outputSgst + outputIgst;
 
   // Input Tax Credit (Purchases)
-  const inputPurchaseTaxable = bills.reduce((s, b) => s + b.subtotal, 0);
-  const itcCgst = bills.reduce((s, b) => s + b.cgst, 0);
-  const itcSgst = bills.reduce((s, b) => s + b.sgst, 0);
-  const itcIgst = bills.reduce((s, b) => s + b.igst, 0);
+  const inputPurchaseTaxable = bills.reduce((s, b) => s + toNum(b.subtotal), 0);
+  const itcCgst = bills.reduce((s, b) => s + toNum(b.cgst), 0);
+  const itcSgst = bills.reduce((s, b) => s + toNum(b.sgst), 0);
+  const itcIgst = bills.reduce((s, b) => s + toNum(b.igst), 0);
   const totalItc = itcCgst + itcSgst + itcIgst;
 
   // Net GST Liability = Output Tax - Input Tax Credit
@@ -348,15 +349,15 @@ export const getGSTR1Report = asyncHandler(async (req: Request, res: Response) =
   const b2cLarge = activeInvoices.filter(
     (inv) =>
       (!inv.customer?.gstin || inv.customer.gstin.trim().length !== 15) &&
-      inv.igst > 0 &&
-      inv.totalAmount > 250000
+      toNum(inv.igst) > 0 &&
+      toNum(inv.totalAmount) > 250000
   );
 
   // Table 7: B2C Small (Other unregistered sales)
   const b2cSmall = activeInvoices.filter(
     (inv) =>
       (!inv.customer?.gstin || inv.customer.gstin.trim().length !== 15) &&
-      !(inv.igst > 0 && inv.totalAmount > 250000)
+      !(toNum(inv.igst) > 0 && toNum(inv.totalAmount) > 250000)
   );
 
   // Table 12: HSN Summary
@@ -381,12 +382,12 @@ export const getGSTR1Report = asyncHandler(async (req: Request, res: Response) =
           sgst: 0,
         };
       }
-      hsnMap[hsn].totalQty += it.quantity;
-      hsnMap[hsn].totalValue += it.amount;
-      hsnMap[hsn].taxableValue += it.quantity * it.unitPrice;
-      hsnMap[hsn].igst += it.igst;
-      hsnMap[hsn].cgst += it.cgst;
-      hsnMap[hsn].sgst += it.sgst;
+      hsnMap[hsn].totalQty += toNum(it.quantity);
+      hsnMap[hsn].totalValue += toNum(it.amount);
+      hsnMap[hsn].taxableValue += toNum(it.quantity) * toNum(it.unitPrice);
+      hsnMap[hsn].igst += toNum(it.igst);
+      hsnMap[hsn].cgst += toNum(it.cgst);
+      hsnMap[hsn].sgst += toNum(it.sgst);
     }
   }
 
@@ -404,27 +405,27 @@ export const getGSTR1Report = asyncHandler(async (req: Request, res: Response) =
     business,
     table4_B2B: {
       count: b2bInvoices.length,
-      taxableValue: b2bInvoices.reduce((s, i) => s + i.subtotal, 0),
-      cgst: b2bInvoices.reduce((s, i) => s + i.cgst, 0),
-      sgst: b2bInvoices.reduce((s, i) => s + i.sgst, 0),
-      igst: b2bInvoices.reduce((s, i) => s + i.igst, 0),
-      totalValue: b2bInvoices.reduce((s, i) => s + i.totalAmount, 0),
+      taxableValue: b2bInvoices.reduce((s, i) => s + toNum(i.subtotal), 0),
+      cgst: b2bInvoices.reduce((s, i) => s + toNum(i.cgst), 0),
+      sgst: b2bInvoices.reduce((s, i) => s + toNum(i.sgst), 0),
+      igst: b2bInvoices.reduce((s, i) => s + toNum(i.igst), 0),
+      totalValue: b2bInvoices.reduce((s, i) => s + toNum(i.totalAmount), 0),
       invoices: b2bInvoices,
     },
     table5_B2CLarge: {
       count: b2cLarge.length,
-      taxableValue: b2cLarge.reduce((s, i) => s + i.subtotal, 0),
-      igst: b2cLarge.reduce((s, i) => s + i.igst, 0),
-      totalValue: b2cLarge.reduce((s, i) => s + i.totalAmount, 0),
+      taxableValue: b2cLarge.reduce((s, i) => s + toNum(i.subtotal), 0),
+      igst: b2cLarge.reduce((s, i) => s + toNum(i.igst), 0),
+      totalValue: b2cLarge.reduce((s, i) => s + toNum(i.totalAmount), 0),
       invoices: b2cLarge,
     },
     table7_B2CSmall: {
       count: b2cSmall.length,
-      taxableValue: b2cSmall.reduce((s, i) => s + i.subtotal, 0),
-      cgst: b2cSmall.reduce((s, i) => s + i.cgst, 0),
-      sgst: b2cSmall.reduce((s, i) => s + i.sgst, 0),
-      igst: b2cSmall.reduce((s, i) => s + i.igst, 0),
-      totalValue: b2cSmall.reduce((s, i) => s + i.totalAmount, 0),
+      taxableValue: b2cSmall.reduce((s, i) => s + toNum(i.subtotal), 0),
+      cgst: b2cSmall.reduce((s, i) => s + toNum(i.cgst), 0),
+      sgst: b2cSmall.reduce((s, i) => s + toNum(i.sgst), 0),
+      igst: b2cSmall.reduce((s, i) => s + toNum(i.igst), 0),
+      totalValue: b2cSmall.reduce((s, i) => s + toNum(i.totalAmount), 0),
     },
     table12_HSN: Object.values(hsnMap),
     table13_Docs: docSummary,
@@ -457,16 +458,16 @@ export const getGSTR3BReport = asyncHandler(async (req: Request, res: Response) 
 
   const table3_1_a = {
     natureOfSupply: 'Outward taxable supplies (other than zero rated, nil rated and exempted)',
-    taxableValue: taxableSupplies.reduce((s, i) => s + i.subtotal, 0),
-    igst: taxableSupplies.reduce((s, i) => s + i.igst, 0),
-    cgst: taxableSupplies.reduce((s, i) => s + i.cgst, 0),
-    sgst: taxableSupplies.reduce((s, i) => s + i.sgst, 0),
+    taxableValue: taxableSupplies.reduce((s, i) => s + toNum(i.subtotal), 0),
+    igst: taxableSupplies.reduce((s, i) => s + toNum(i.igst), 0),
+    cgst: taxableSupplies.reduce((s, i) => s + toNum(i.cgst), 0),
+    sgst: taxableSupplies.reduce((s, i) => s + toNum(i.sgst), 0),
     cess: 0,
   };
 
   const table3_1_c = {
     natureOfSupply: 'Other outward supplies (Nil rated, exempted / Non-GST)',
-    taxableValue: zeroRatedOrExempt.reduce((s, i) => s + i.subtotal, 0),
+    taxableValue: zeroRatedOrExempt.reduce((s, i) => s + toNum(i.subtotal), 0),
     igst: 0,
     cgst: 0,
     sgst: 0,
@@ -476,9 +477,9 @@ export const getGSTR3BReport = asyncHandler(async (req: Request, res: Response) 
   // 4. Eligible ITC
   const itcAvailableAllOther = {
     details: '(5) All other ITC (Inward purchases from registered suppliers)',
-    igst: bills.reduce((s, b) => s + b.igst, 0),
-    cgst: bills.reduce((s, b) => s + b.cgst, 0),
-    sgst: bills.reduce((s, b) => s + b.sgst, 0),
+    igst: bills.reduce((s, b) => s + toNum(b.igst), 0),
+    cgst: bills.reduce((s, b) => s + toNum(b.cgst), 0),
+    sgst: bills.reduce((s, b) => s + toNum(b.sgst), 0),
     cess: 0,
   };
 
@@ -552,11 +553,11 @@ export const getDailySalesReport = asyncHandler(async (req: Request, res: Respon
       };
     }
     dailyMap[dayStr].invoiceCount += 1;
-    dailyMap[dayStr].taxable += inv.subtotal;
-    dailyMap[dayStr].tax += inv.taxAmount;
-    dailyMap[dayStr].totalSales += inv.totalAmount;
-    dailyMap[dayStr].totalCollected += inv.paidAmount;
-    dailyMap[dayStr].balanceDue += Math.max(0, inv.totalAmount - inv.paidAmount);
+    dailyMap[dayStr].taxable += toNum(inv.subtotal);
+    dailyMap[dayStr].tax += toNum(inv.taxAmount);
+    dailyMap[dayStr].totalSales += toNum(inv.totalAmount);
+    dailyMap[dayStr].totalCollected += toNum(inv.paidAmount);
+    dailyMap[dayStr].balanceDue += Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount));
   }
 
   const days = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
@@ -603,10 +604,10 @@ export const getMonthlySalesReport = asyncHandler(async (req: Request, res: Resp
       monthlyMap[key] = { month: key, label, count: 0, taxable: 0, tax: 0, total: 0, collected: 0 };
     }
     monthlyMap[key].count += 1;
-    monthlyMap[key].taxable += inv.subtotal;
-    monthlyMap[key].tax += inv.taxAmount;
-    monthlyMap[key].total += inv.totalAmount;
-    monthlyMap[key].collected += inv.paidAmount;
+    monthlyMap[key].taxable += toNum(inv.subtotal);
+    monthlyMap[key].tax += toNum(inv.taxAmount);
+    monthlyMap[key].total += toNum(inv.totalAmount);
+    monthlyMap[key].collected += toNum(inv.paidAmount);
   }
 
   const months = Object.values(monthlyMap).sort((a, b) => a.month.localeCompare(b.month));
@@ -631,11 +632,11 @@ export const getPurchaseSummaryReport = asyncHandler(async (req: Request, res: R
     orderBy: { billDate: 'desc' },
   });
 
-  const totalPurchases = bills.reduce((s, b) => s + b.totalAmount, 0);
-  const totalPaid = bills.reduce((s, b) => s + b.paidAmount, 0);
+  const totalPurchases = bills.reduce((s, b) => s + toNum(b.totalAmount), 0);
+  const totalPaid = bills.reduce((s, b) => s + toNum(b.paidAmount), 0);
   const totalDue = Math.max(0, totalPurchases - totalPaid);
-  const totalTaxable = bills.reduce((s, b) => s + b.subtotal, 0);
-  const totalTax = bills.reduce((s, b) => s + b.taxAmount, 0);
+  const totalTaxable = bills.reduce((s, b) => s + toNum(b.subtotal), 0);
+  const totalTax = bills.reduce((s, b) => s + toNum(b.taxAmount), 0);
 
   sendSuccess(res, {
     totalPurchases,
@@ -668,10 +669,10 @@ export const getStockValuationReport = asyncHandler(async (req: Request, res: Re
   let lowStockCount = 0;
 
   const itemReports = items.map((it) => {
-    const costValue = it.currentStock * it.purchasePrice;
-    const retailValue = it.currentStock * it.sellingPrice;
+    const costValue = toNum(it.currentStock) * toNum(it.purchasePrice);
+    const retailValue = toNum(it.currentStock) * toNum(it.sellingPrice);
     const potentialMargin = retailValue - costValue;
-    const isLowStock = it.trackInventory && it.currentStock <= it.minStock;
+    const isLowStock = it.trackInventory && toNum(it.currentStock) <= toNum(it.minStock);
 
     if (isLowStock) lowStockCount += 1;
     totalCostValuation += costValue;
@@ -685,10 +686,10 @@ export const getStockValuationReport = asyncHandler(async (req: Request, res: Re
       hsnCode: it.hsnCode,
       category: it.category?.name || 'Uncategorized',
       unit: it.unit?.shortName || 'Pcs',
-      currentStock: it.currentStock,
-      minStock: it.minStock,
-      purchasePrice: it.purchasePrice,
-      sellingPrice: it.sellingPrice,
+      currentStock: toNum(it.currentStock),
+      minStock: toNum(it.minStock),
+      purchasePrice: toNum(it.purchasePrice),
+      sellingPrice: toNum(it.sellingPrice),
       costValuation: costValue,
       retailValuation: retailValue,
       potentialProfit: potentialMargin,
@@ -726,18 +727,18 @@ export const getLowStockReport = asyncHandler(async (req: Request, res: Response
   });
 
   const lowStockItems = items
-    .filter((it) => it.currentStock <= it.minStock)
+    .filter((it) => toNum(it.currentStock) <= toNum(it.minStock))
     .map((it) => ({
       id: it.id,
       name: it.name,
       sku: it.sku,
       category: it.category?.name || 'General',
-      currentStock: it.currentStock,
-      minStock: it.minStock,
-      reorderShortage: Math.max(0, it.minStock - it.currentStock),
+      currentStock: toNum(it.currentStock),
+      minStock: toNum(it.minStock),
+      reorderShortage: Math.max(0, toNum(it.minStock) - toNum(it.currentStock)),
       unit: it.unit?.shortName || 'Pcs',
-      purchasePrice: it.purchasePrice,
-      estimatedReorderCost: Math.max(0, it.minStock - it.currentStock) * it.purchasePrice,
+      purchasePrice: toNum(it.purchasePrice),
+      estimatedReorderCost: Math.max(0, toNum(it.minStock) - toNum(it.currentStock)) * toNum(it.purchasePrice),
     }));
 
   sendSuccess(res, {
@@ -769,9 +770,9 @@ export const getCashFlowReport = asyncHandler(async (req: Request, res: Response
     }),
   ]);
 
-  const totalCustomerReceipts = inwardPayments.reduce((s, p) => s + p.amount, 0);
-  const totalSupplierPayouts = outwardPayments.reduce((s, p) => s + p.amount, 0);
-  const totalDirectExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+  const totalCustomerReceipts = inwardPayments.reduce((s, p) => s + toNum(p.amount), 0);
+  const totalSupplierPayouts = outwardPayments.reduce((s, p) => s + toNum(p.amount), 0);
+  const totalDirectExpenses = expenses.reduce((s, e) => s + toNum(e.amount), 0);
 
   const totalInflow = totalCustomerReceipts;
   const totalOutflow = totalSupplierPayouts + totalDirectExpenses;

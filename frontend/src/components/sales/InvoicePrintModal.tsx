@@ -11,6 +11,9 @@ import {
   Receipt,
   RotateCw,
   Save,
+  Share2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -35,22 +38,40 @@ export default function InvoicePrintModal({
   const businessId = currentBusiness?.id;
 
   const [invoice, setInvoice] = useState<any>(null);
+  const [bankAccount, setBankAccount] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [format, setFormat] = useState<PrintFormat>('A4');
   const [printMsg, setPrintMsg] = useState('');
   const [printErr, setPrintErr] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const fetchInvoice = async () => {
     if (!businessId || !invoiceId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/businesses/${businessId}/sales-invoices/${invoiceId}`);
-      if (res.success && res.data) {
-        setInvoice(res.data);
+      const [invRes, bankRes] = await Promise.all([
+        api.get(`/businesses/${businessId}/sales-invoices/${invoiceId}`),
+        api.get(`/businesses/${businessId}/bank-accounts`),
+      ]);
+
+      if (invRes.success && invRes.data) {
+        setInvoice(invRes.data);
       } else {
-        setError(res.error || res.message || 'Failed to load invoice');
+        setError(invRes.error || invRes.message || 'Failed to load invoice');
       }
+
+      // Prioritize the shop's primary bank account from database
+      const invBankAccounts = invRes.data?.business?.bankAccounts || [];
+      const shopBankAccounts = Array.isArray(bankRes.data) ? bankRes.data : [];
+      const accountsPool = invBankAccounts.length > 0 ? invBankAccounts : shopBankAccounts;
+
+      const primary =
+        accountsPool.find((b: any) => b.isPrimary) ||
+        accountsPool[0] ||
+        null;
+
+      setBankAccount(primary);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch invoice');
     } finally {
@@ -64,6 +85,34 @@ export default function InvoicePrintModal({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleCopyShareText = () => {
+    if (!invoice) return;
+    const due = Math.max(0, (invoice.totalAmount || 0) - (invoice.paidAmount || 0));
+    const lines = [
+      `*INVOICE: ${invoice.invoiceNumber}*`,
+      `Date: ${formatDate(invoice.invoiceDate)}`,
+      `Business: ${biz?.name || ''}`,
+      `Customer: ${invoice.customer?.name || 'Cash Customer'}`,
+      `Total Amount: ${formatCurrency(invoice.totalAmount)}`,
+      `Paid Amount: ${formatCurrency(invoice.paidAmount)}`,
+      due > 0 ? `Balance Due: ${formatCurrency(due)}` : 'Status: Fully Paid',
+    ];
+    if (bankAccount) {
+      lines.push(
+        '',
+        '*Bank & Payment Details:*',
+        `Bank: ${bankAccount.bankName}${bankAccount.branchName ? ` (${bankAccount.branchName})` : ''}`,
+        `A/c Holder: ${bankAccount.accountHolder}`,
+        `A/c No: ${bankAccount.accountNumber}`,
+        `IFSC Code: ${bankAccount.ifscCode}`,
+        ...(bankAccount.upiId ? [`UPI ID: ${bankAccount.upiId}`] : [])
+      );
+    }
+    navigator.clipboard.writeText(lines.join('\n'));
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2500);
   };
 
   const handleElectronPDF = async () => {
@@ -176,6 +225,14 @@ export default function InvoicePrintModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopyShareText}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
+              title="Copy bill text summary with payment and bank details"
+            >
+              {copySuccess ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+              {copySuccess ? 'Copied!' : 'Share / Copy'}
+            </button>
             {isElectron ? (
               <>
                 <button
@@ -243,7 +300,11 @@ export default function InvoicePrintModal({
               {biz?.phone && <p className="text-[10px]">Ph: {biz.phone}</p>}
               {biz?.address && <p className="text-[9px]">{biz.address}</p>}
               <p className="font-bold text-[10px] mt-1 uppercase">
-                {invoice.invoiceType === 'BILL_OF_SUPPLY' ? 'BILL OF SUPPLY' : 'TAX INVOICE'}
+                {invoice.invoiceType === 'BILL_OF_SUPPLY'
+                  ? 'BILL OF SUPPLY'
+                  : invoice.invoiceType === 'SERVICE'
+                  ? 'SERVICE INVOICE / CASH BILL'
+                  : 'TAX INVOICE'}
               </p>
             </div>
 
@@ -318,6 +379,14 @@ export default function InvoicePrintModal({
               )}
             </div>
 
+            {/* Bank / UPI Payment details */}
+            {bankAccount && (
+              <div className="border-t border-dashed border-black pt-1 pb-1 text-[9px] space-y-0.5 text-center">
+                <p className="font-bold">{bankAccount.bankName} A/c: {bankAccount.accountNumber}</p>
+                <p>IFSC: {bankAccount.ifscCode}{bankAccount.upiId ? ` • UPI: ${bankAccount.upiId}` : ''}</p>
+              </div>
+            )}
+
             <div className="text-center text-[9px] pt-1 space-y-0.5">
               <p>*** THANK YOU! VISIT AGAIN ***</p>
               <p>Powered by Lekvanta</p>
@@ -336,7 +405,9 @@ export default function InvoicePrintModal({
               {biz?.address && <p className="text-[10px]">{biz.address}</p>}
               {biz?.phone && <p className="text-[10px]">Tel: {biz.phone}</p>}
               <div className="inline-block border border-black px-2 py-0.5 text-[10px] font-bold uppercase mt-1">
-                {invoice.invoiceType?.replace('_', ' ') || 'TAX INVOICE'}
+                {invoice.invoiceType === 'SERVICE'
+                  ? 'SERVICE INVOICE / CASH BILL'
+                  : invoice.invoiceType?.replace('_', ' ') || 'TAX INVOICE'}
               </div>
             </div>
 
@@ -443,6 +514,14 @@ export default function InvoicePrintModal({
               )}
             </div>
 
+            {/* Bank / UPI Payment details */}
+            {bankAccount && (
+              <div className="border-t border-dashed border-black pt-1.5 pb-1 text-[10px] space-y-0.5 text-center">
+                <p className="font-bold">Bank: {bankAccount.bankName} • A/c: {bankAccount.accountNumber}</p>
+                <p>IFSC: {bankAccount.ifscCode}{bankAccount.upiId ? ` • UPI: ${bankAccount.upiId}` : ''}</p>
+              </div>
+            )}
+
             <div className="text-center text-[10px] pt-1 space-y-1">
               <p className="font-bold">Thank You For Your Business!</p>
               {invoice.terms && <p className="text-[9px] text-slate-600">{invoice.terms}</p>}
@@ -497,6 +576,8 @@ export default function InvoicePrintModal({
                     ? 'BILL OF SUPPLY'
                     : invoice.invoiceType === 'ESTIMATE'
                     ? 'ESTIMATE / QUOTE'
+                    : invoice.invoiceType === 'SERVICE'
+                    ? 'SERVICE INVOICE'
                     : 'TAX INVOICE'}
                 </span>
                 <p className="text-lg font-black text-slate-900 mt-1 font-mono">
@@ -664,10 +745,54 @@ export default function InvoicePrintModal({
                   </div>
                 )}
 
-                <div className="pt-4 text-xs text-slate-500">
-                  <p className="font-semibold text-slate-700">Bank Transfer Details:</p>
-                  <p>Bank: HDFC Bank • A/c: 50200012345678 • IFSC: HDFC0001234</p>
-                </div>
+                {bankAccount ? (
+                  <div className="pt-3 border-t border-slate-200 text-xs text-slate-600 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px] uppercase tracking-wider">
+                      <span>🏦 Bank Transfer & Payment Details</span>
+                      {bankAccount.isPrimary && (
+                        <span className="text-[9px] font-normal text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                          Primary Account
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs pt-0.5">
+                      <div>
+                        <span className="text-slate-400">Bank: </span>
+                        <span className="font-semibold text-slate-800">{bankAccount.bankName}</span>
+                        {bankAccount.branchName && (
+                          <span className="text-slate-500 text-[11px]"> ({bankAccount.branchName})</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-slate-400">A/c Holder: </span>
+                        <span className="font-semibold text-slate-800">{bankAccount.accountHolder}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">A/c Number: </span>
+                        <span className="font-mono font-bold text-slate-900">{bankAccount.accountNumber}</span>
+                        {bankAccount.accountType && (
+                          <span className="text-[10px] text-slate-400 ml-1">({bankAccount.accountType})</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-slate-400">IFSC Code: </span>
+                        <span className="font-mono font-bold text-slate-900">{bankAccount.ifscCode}</span>
+                      </div>
+                      {bankAccount.upiId && (
+                        <div className="col-span-2 pt-0.5 flex items-center gap-1">
+                          <span className="text-slate-400">UPI ID: </span>
+                          <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[11px] border border-indigo-100">
+                            {bankAccount.upiId}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="pt-3 border-t border-slate-200 text-[11px] text-slate-400 italic">
+                    Bank transfer details not configured for this shop.
+                  </div>
+                )}
               </div>
 
               {/* Totals */}

@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 /** GET /api/businesses/:businessId/customers */
 export const listCustomers = asyncHandler(async (req: Request, res: Response) => {
@@ -50,10 +51,10 @@ export const listCustomers = asyncHandler(async (req: Request, res: Response) =>
   // Compute live currentOutstanding for each customer from real transactions
   const customers = rawCustomers.map((c) => {
     const invoiceDue = c.salesInvoices.reduce(
-      (sum, inv) => sum + Math.max(0, inv.totalAmount - inv.paidAmount),
+      (sum, inv) => sum + Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount)),
       0
     );
-    const currentOutstanding = (c.openingBalance || 0) + invoiceDue;
+    const currentOutstanding = toNum(c.openingBalance) + invoiceDue;
 
     return {
       id: c.id,
@@ -62,8 +63,8 @@ export const listCustomers = asyncHandler(async (req: Request, res: Response) =>
       email: c.email,
       billingAddress: c.billingAddress,
       gstin: c.gstin,
-      openingBalance: c.openingBalance,
-      creditLimit: c.creditLimit,
+      openingBalance: toNum(c.openingBalance),
+      creditLimit: toNum(c.creditLimit),
       currentOutstanding,
       invoiceCount: c.salesInvoices.length,
       createdAt: c.createdAt,
@@ -84,10 +85,10 @@ export const listCustomers = asyncHandler(async (req: Request, res: Response) =>
 
   const totalReceivables = allCustomers.reduce((acc, c) => {
     const due = c.salesInvoices.reduce(
-      (sum, inv) => sum + Math.max(0, inv.totalAmount - inv.paidAmount),
+      (sum, inv) => sum + Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount)),
       0
     );
-    const outstanding = (c.openingBalance || 0) + due;
+    const outstanding = toNum(c.openingBalance) + due;
     return acc + (outstanding > 0 ? outstanding : 0);
   }, 0);
 
@@ -136,8 +137,8 @@ export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
   // Compute outstanding balance
   const invoiceDue = customer.salesInvoices
     .filter((inv) => inv.status !== 'CANCELLED')
-    .reduce((sum, inv) => sum + Math.max(0, inv.totalAmount - inv.paidAmount), 0);
-  const currentOutstanding = (customer.openingBalance || 0) + invoiceDue;
+    .reduce((sum, inv) => sum + Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount)), 0);
+  const currentOutstanding = toNum(customer.openingBalance) + invoiceDue;
 
   // Build Chronological Party Ledger
   interface LedgerEntry {
@@ -153,14 +154,15 @@ export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
   const rawEntries: { date: Date; type: 'OPENING' | 'INVOICE' | 'PAYMENT'; refNo: string; description: string; debit: number; credit: number }[] = [];
 
   // 1. Opening Balance
-  if (customer.openingBalance !== 0) {
+  const custOpening = toNum(customer.openingBalance);
+  if (custOpening !== 0) {
     rawEntries.push({
       date: customer.createdAt,
       type: 'OPENING',
       refNo: 'OPENING',
       description: 'Opening Balance',
-      debit: customer.openingBalance > 0 ? customer.openingBalance : 0,
-      credit: customer.openingBalance < 0 ? Math.abs(customer.openingBalance) : 0,
+      debit: custOpening > 0 ? custOpening : 0,
+      credit: custOpening < 0 ? Math.abs(custOpening) : 0,
     });
   }
 
@@ -172,7 +174,7 @@ export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
       type: 'INVOICE',
       refNo: inv.invoiceNumber,
       description: `Sales Invoice #${inv.invoiceNumber} (${inv.status})`,
-      debit: inv.totalAmount,
+      debit: toNum(inv.totalAmount),
       credit: 0,
     });
   }
@@ -185,7 +187,7 @@ export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
       refNo: p.reference || 'PAYMENT',
       description: `Payment Received (${p.method})${p.notes ? ' - ' + p.notes : ''}`,
       debit: 0,
-      credit: p.amount,
+      credit: toNum(p.amount),
     });
   }
 

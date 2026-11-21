@@ -22,19 +22,75 @@ export const registerSchema = z.object({
 
 export const createBusinessSchema = z.object({
   name: z.string().min(2),
-  phone: z.string().optional(),
+  phone: z.string().optional().or(z.literal('')),
   email: z.string().email().optional().or(z.literal('')),
-  gstin: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  pincode: z.string().optional(),
+  gstin: z.string().optional().or(z.literal('')),
+  ownerName: z.string().optional().or(z.literal('')),
+  panNumber: z.string().optional().or(z.literal('')),
+  website: z.string().optional().or(z.literal('')),
+  logoUrl: z.string().optional().or(z.literal('')),
+  financialYear: z.string().optional().or(z.literal('')),
+  address: z.string().optional().or(z.literal('')),
+  city: z.string().optional().or(z.literal('')),
+  state: z.string().optional().or(z.literal('')),
+  pincode: z.string().optional().or(z.literal('')),
   type: z.enum(['RETAIL', 'WHOLESALE', 'MANUFACTURER', 'SERVICE']).optional(),
   invoicePrefix: z.string().max(10).optional(),
   purchasePrefix: z.string().max(10).optional(),
 });
 
 export const updateBusinessSchema = createBusinessSchema.partial();
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(1, 'Name is required').optional(),
+  phone: z.string().optional().nullable().or(z.literal('')),
+  alternatePhone: z.string().optional().nullable().or(z.literal('')),
+  dob: z.string().optional().nullable().or(z.literal('')),
+  address: z.string().optional().nullable().or(z.literal('')),
+  city: z.string().optional().nullable().or(z.literal('')),
+  state: z.string().optional().nullable().or(z.literal('')),
+  pincode: z.string().optional().nullable().or(z.literal('')),
+  profilePhoto: z.string().optional().nullable().or(z.literal('')),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters'),
+});
+
+export const createBankAccountSchema = z.object({
+  accountHolder: z.string().min(1, 'Account holder name is required'),
+  bankName: z.string().min(1, 'Bank name is required'),
+  accountNumber: z.string().min(5, 'Valid account number is required'),
+  ifscCode: z.string().min(4, 'IFSC code is required'),
+  branchName: z.string().optional().nullable().or(z.literal('')),
+  accountType: z.enum(['SAVINGS', 'CURRENT']).default('CURRENT'),
+  upiId: z.string().optional().nullable().or(z.literal('')),
+  qrCodeUrl: z.string().optional().nullable().or(z.literal('')),
+  isPrimary: z.boolean().default(false),
+});
+
+export const updateBankAccountSchema = createBankAccountSchema.partial();
+
+export const createBusinessUserSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().email('Valid email is required'),
+  phone: z.string().optional().nullable().or(z.literal('')),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  role: z.enum(['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'STAFF']).default('CASHIER'),
+  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+});
+
+export const updateBusinessUserSchema = z.object({
+  name: z.string().min(1).optional(),
+  phone: z.string().optional().nullable().or(z.literal('')),
+  role: z.enum(['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'STAFF']).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+});
+
+export const resetUserPasswordSchema = z.object({
+  newPassword: z.string().min(6, 'Password must be at least 6 characters'),
+});
 
 export const createCustomerSchema = z.object({
   name: z.string().min(1, 'Customer name is required'),
@@ -103,7 +159,7 @@ export const createSalesInvoiceSchema = z.object({
   invoiceDate: z.coerce.date(),
   dueDate: z.coerce.date().optional().nullable(),
   invoiceType: z
-    .enum(['TAX_INVOICE', 'BILL_OF_SUPPLY', 'RETAIL', 'ESTIMATE', 'QUOTATION'])
+    .enum(['TAX_INVOICE', 'BILL_OF_SUPPLY', 'RETAIL', 'ESTIMATE', 'QUOTATION', 'SERVICE'])
     .default('TAX_INVOICE'),
   status: z.enum(['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE', 'CANCELLED']).default('DRAFT'),
   discountAmount: z.coerce.number().min(0).default(0),
@@ -218,4 +274,19 @@ export const createUnitSchema = z.object({
 export const createCategorySchema = z.object({
   name: z.string().min(1),
 });
+
+export const createServiceSchema = z.object({
+  name: z.string().min(1, 'Service name is required'),
+  code: z.string().optional().nullable().or(z.literal('')),
+  category: z.string().optional().nullable().or(z.literal('')),
+  unit: z.string().default('page'),
+  price: z.coerce.number().min(0).default(0),
+  taxRate: z.coerce.number().min(0).max(100).default(0),
+  icon: z.string().optional().nullable().or(z.literal('')),
+  description: z.string().optional().nullable().or(z.literal('')),
+  isActive: z.boolean().default(true),
+});
+
+export const updateServiceSchema = createServiceSchema.partial();
+
 

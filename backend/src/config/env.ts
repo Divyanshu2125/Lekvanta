@@ -1,5 +1,7 @@
+import path from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 function required(key: string): string {
   const val = process.env[key];
@@ -14,6 +16,7 @@ export const env = {
   JWT_SECRET: required('JWT_SECRET'),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? '7d',
   FRONTEND_URL: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  DESCOPE_PROJECT_ID: process.env.DESCOPE_PROJECT_ID ?? 'P3MHZdzcXDlJn2gOSo59IpPaIGJn',
 } as const;
 
 export const isDev = env.NODE_ENV === 'development';

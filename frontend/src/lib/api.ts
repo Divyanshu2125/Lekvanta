@@ -44,6 +44,24 @@ export async function apiRequest<T = any>(
     clearTimeout(timeoutId);
 
     const data = await res.json();
+
+    if (
+      res.status === 401 &&
+      !endpoint.includes('/auth/login') &&
+      !endpoint.includes('/auth/register') &&
+      !endpoint.includes('/auth/descope-sync')
+    ) {
+      localStorage.removeItem('lekvanta_token');
+      localStorage.removeItem('lekvanta_active_business');
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.pathname.startsWith('/login') &&
+        !window.location.pathname.startsWith('/signup')
+      ) {
+        window.location.href = '/login?expired=1';
+      }
+    }
+
     return data;
   } catch (error: any) {
     clearTimeout(timeoutId);

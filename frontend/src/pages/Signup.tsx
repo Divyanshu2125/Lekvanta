@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { Descope } from '@descope/react-sdk';
 import { useAuthStore } from '@/store/authStore';
 import {
   Package,
   Building2,
+  Sparkles,
   User,
   Phone,
   Mail,
@@ -14,6 +16,7 @@ import {
   ArrowRight,
   CheckCircle2,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -42,7 +45,10 @@ const FINANCIAL_YEARS = [
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { signup } = useAuthStore();
+  const { signup, descopeLogin } = useAuthStore();
+
+  const [signupMode, setSignupMode] = useState<'descope' | 'manual'>('descope');
+  const flowId = 'sign-up';
 
   const [formData, setFormData] = useState({
     ownerName: '',
@@ -59,6 +65,36 @@ export default function Signup() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleDescopeSuccess = async (e: any) => {
+    const sessionToken = e.detail?.sessionJwt;
+    const descopeUser = e.detail?.user;
+
+    if (!sessionToken) {
+      setError('No session token returned by Descope.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const result = await descopeLogin(sessionToken, descopeUser);
+    setLoading(false);
+
+    if (result.success) {
+      navigate('/dashboard', { replace: true });
+    } else {
+      setError(result.error || 'Failed to authenticate with Lekvanta.');
+    }
+  };
+
+  const handleDescopeError = (err: any) => {
+    console.error('Descope signup error:', err);
+    setError(
+      err?.detail?.errorMessage ||
+      err?.message ||
+      'Authentication error occurred. Please try again.'
+    );
+  };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -125,6 +161,36 @@ export default function Signup() {
 
       <div className="max-w-2xl mx-auto">
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-10">
+          {/* Mode Switcher */}
+          <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl mb-6 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => { setSignupMode('descope'); setError(null); }}
+              className={cn(
+                'py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all',
+                signupMode === 'descope'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              )}
+            >
+              <Sparkles size={14} className={signupMode === 'descope' ? 'text-indigo-600' : 'text-slate-400'} />
+              <span>Instant Signup (Descope)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSignupMode('manual'); setError(null); }}
+              className={cn(
+                'py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all',
+                signupMode === 'manual'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              )}
+            >
+              <Building2 size={14} className={signupMode === 'manual' ? 'text-indigo-600' : 'text-slate-400'} />
+              <span>Custom Shop Setup</span>
+            </button>
+          </div>
+
           {error && (
             <div className="mb-6 flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs leading-relaxed">
               <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-600" />
@@ -132,6 +198,25 @@ export default function Signup() {
             </div>
           )}
 
+          {loading && (
+            <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-indigo-600 font-medium">
+              <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <span>Creating your shop profile…</span>
+            </div>
+          )}
+
+          {!loading && signupMode === 'descope' && (
+            <div className="descope-container py-2 min-h-[320px] flex items-center justify-center">
+              <Descope
+                flowId={flowId}
+                onSuccess={handleDescopeSuccess}
+                onError={handleDescopeError}
+                theme="light"
+              />
+            </div>
+          )}
+
+          {!loading && signupMode === 'manual' && (
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Step 1: Business Profile */}
             <div>
@@ -356,6 +441,7 @@ export default function Signup() {
               )}
             </button>
           </form>
+          )}
         </div>
 
         {/* Footer */}

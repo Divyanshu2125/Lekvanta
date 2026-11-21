@@ -7,6 +7,7 @@ import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
 import { createAuditLog } from '../services/audit';
+import { descopeClient } from '../services/descope';
 
 function signToken(userId: string, email: string): string {
   return jwt.sign({ userId, email } as object, env.JWT_SECRET, {
@@ -115,7 +116,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     },
   });
 
-  if (!user) throw AppError.unauthorized('Invalid email or password');
+  if (!user || !user.passwordHash) {
+    throw AppError.unauthorized('Invalid email or password. If you signed up via Descope/Google, please sign in using that method.');
+  }
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) throw AppError.unauthorized('Invalid email or password');
 
@@ -140,6 +143,184 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
+/** POST /api/auth/descope-sync — Validates Descope session and syncs with SQLite database */
+export const descopeSync = asyncHandler(async (req: Request, res: Response) => {
+  const { sessionToken, user: descopeUserPayload } = req.body;
+
+  if (!sessionToken) {
+    throw AppError.badRequest('Descope sessionToken is required');
+  }
+
+  // 1. Independently validate token with Descope SDK
+  let authInfo;
+  try {
+    authInfo = await descopeClient.validateSession(sessionToken);
+  } catch (err: any) {
+    throw AppError.unauthorized(`Invalid or expired Descope session: ${err.message || err}`);
+  }
+
+  if (!authInfo || !authInfo.token) {
+    throw AppError.unauthorized('Invalid Descope authentication token');
+  }
+
+  const descopeUserId = authInfo.token.sub;
+  const claims = (authInfo.token as any).claims || (authInfo.token as any) || {};
+  const email = (
+    (authInfo.token as any).email ||
+    claims.email ||
+    descopeUserPayload?.email ||
+    ''
+  ).toLowerCase().trim();
+  const name =
+    (authInfo.token as any).name ||
+    claims.name ||
+    descopeUserPayload?.name ||
+    (email ? email.split('@')[0] : 'Shop Owner');
+  const phone = (authInfo.token as any).phone || claims.phone || descopeUserPayload?.phone || '';
+  const picture = (authInfo.token as any).picture || claims.picture || descopeUserPayload?.picture || '';
+
+  // 2. Find existing user primarily by unique descopeUserId
+  let user = await prisma.user.findFirst({
+    where: { descopeUserId },
+    include: {
+      businesses: {
+        where: { status: 'ACTIVE' },
+        include: { business: true },
+      },
+    },
+  });
+
+  // If not found by descopeUserId, only match by email if that account has no descopeUserId attached
+  if (!user && email) {
+    user = await prisma.user.findFirst({
+      where: {
+        email,
+        descopeUserId: null,
+      },
+      include: {
+        businesses: {
+          where: { status: 'ACTIVE' },
+          include: { business: true },
+        },
+      },
+    });
+  }
+
+  // 3. Auto-provision if user does not exist
+  if (!user) {
+    const resolvedEmail = email || `${descopeUserId}@descope.user`;
+    user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          name,
+          email: resolvedEmail,
+          phone: phone || undefined,
+          profilePhoto: picture || undefined,
+          descopeUserId,
+        },
+      });
+
+      const newBusiness = await tx.business.create({
+        data: {
+          name: `${name}'s Shop`,
+          type: 'RETAIL',
+          email: resolvedEmail,
+          phone: phone || undefined,
+          businessUsers: {
+            create: { userId: newUser.id, role: 'OWNER', status: 'ACTIVE' },
+          },
+        },
+      });
+
+      await seedDefaultAccounts(tx, newBusiness.id);
+      await seedDefaultTaxRates(tx, newBusiness.id);
+      await seedDefaultUnits(tx, newBusiness.id);
+
+      return {
+        ...newUser,
+        businesses: [{ business: newBusiness, role: 'OWNER' }],
+      } as any;
+    });
+
+    await createAuditLog({
+      userId: user!.id,
+      action: 'CREATE',
+      entityType: 'User',
+      entityId: user!.id,
+      ipAddress: req.ip,
+    });
+  } else {
+    // 4. Update profile / link descopeUserId if needed
+    const updateData: any = {};
+    if (!user.descopeUserId) updateData.descopeUserId = descopeUserId;
+    if (picture && !user.profilePhoto) updateData.profilePhoto = picture;
+    if (phone && !user.phone) updateData.phone = phone;
+
+    if (Object.keys(updateData).length > 0) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      });
+    }
+
+    // If user has no businesses yet, provision their initial shop
+    if (user.businesses.length === 0) {
+      const newBusiness = await prisma.$transaction(async (tx) => {
+        const b = await tx.business.create({
+          data: {
+            name: `${user!.name}'s Shop`,
+            type: 'RETAIL',
+            email: user!.email,
+            phone: user!.phone || undefined,
+            businessUsers: {
+              create: { userId: user!.id, role: 'OWNER', status: 'ACTIVE' },
+            },
+          },
+        });
+        await seedDefaultAccounts(tx, b.id);
+        await seedDefaultTaxRates(tx, b.id);
+        await seedDefaultUnits(tx, b.id);
+        return b;
+      });
+
+      user = {
+        ...user,
+        businesses: [{ business: newBusiness, role: 'OWNER' }],
+      } as any;
+    }
+  }
+
+  await createAuditLog({
+    userId: user!.id,
+    action: 'LOGIN',
+    entityType: 'User',
+    entityId: user!.id,
+    ipAddress: req.ip,
+  });
+
+  const token = signToken(user!.id, user!.email);
+
+  sendSuccess(res, {
+    token,
+    user: {
+      id: user!.id,
+      name: user!.name,
+      email: user!.email,
+      phone: user!.phone,
+      profilePhoto: user!.profilePhoto,
+      descopeUserId: user!.descopeUserId,
+    },
+    businesses: user!.businesses.map((bu: any) => ({
+      id: bu.business.id,
+      name: bu.business.name,
+      type: bu.business.type,
+      role: bu.role,
+      logoUrl: bu.business.logoUrl,
+      gstin: bu.business.gstin,
+    })),
+  });
+});
+
 /** GET /api/auth/me */
 export const getMe = asyncHandler(async (req: Request, res: Response) => {
   const user = await prisma.user.findUniqueOrThrow({
@@ -155,11 +336,77 @@ export const getMe = asyncHandler(async (req: Request, res: Response) => {
     id: user.id,
     name: user.name,
     email: user.email,
+    phone: user.phone,
+    alternatePhone: user.alternatePhone,
+    profilePhoto: user.profilePhoto,
+    dob: user.dob,
+    address: user.address,
+    city: user.city,
+    state: user.state,
+    pincode: user.pincode,
     businesses: user.businesses.map((bu) => ({
       ...bu.business,
       role: bu.role,
     })),
   });
+});
+
+/** PATCH /api/auth/profile */
+export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { name, phone, alternatePhone, profilePhoto, dob, address, city, state, pincode } = req.body;
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      ...(name ? { name } : {}),
+      phone: phone !== undefined ? phone : undefined,
+      alternatePhone: alternatePhone !== undefined ? alternatePhone : undefined,
+      profilePhoto: profilePhoto !== undefined ? profilePhoto : undefined,
+      dob: dob !== undefined ? dob : undefined,
+      address: address !== undefined ? address : undefined,
+      city: city !== undefined ? city : undefined,
+      state: state !== undefined ? state : undefined,
+      pincode: pincode !== undefined ? pincode : undefined,
+    },
+  });
+
+  sendSuccess(res, {
+    id: updated.id,
+    name: updated.name,
+    email: updated.email,
+    phone: updated.phone,
+    alternatePhone: updated.alternatePhone,
+    profilePhoto: updated.profilePhoto,
+    dob: updated.dob,
+    address: updated.address,
+    city: updated.city,
+    state: updated.state,
+    pincode: updated.pincode,
+  }, 'Profile updated successfully');
+});
+
+/** POST /api/auth/change-password */
+export const changePassword = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { currentPassword, newPassword } = req.body;
+
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  if (!user.passwordHash) {
+    throw AppError.badRequest('This account uses passwordless Descope authentication. Password change is not required.');
+  }
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) {
+    throw AppError.badRequest('Current password is incorrect');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash },
+  });
+
+  sendSuccess(res, null, 'Password changed successfully');
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

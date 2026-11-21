@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { sendSuccess, sendCreated } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
 import { AppError } from '../utils/AppError';
+import { toNum } from '../utils/number';
 
 // ── Chart of Accounts ─────────────────────────────────────────────────────────
 
@@ -21,8 +22,8 @@ export const getChartOfAccounts = asyncHandler(async (req: Request, res: Respons
 
   // Calculate live balances dynamically from journal lines (never hardcoded)
   const formatted = accounts.map((acc) => {
-    const totalDebit = acc.lines.reduce((s, l) => s + (l.debit || 0), 0);
-    const totalCredit = acc.lines.reduce((s, l) => s + (l.credit || 0), 0);
+    const totalDebit = acc.lines.reduce((s, l) => s + toNum(l.debit), 0);
+    const totalCredit = acc.lines.reduce((s, l) => s + toNum(l.credit), 0);
 
     // Normal debit balance for ASSET & EXPENSE; Normal credit balance for LIABILITY, EQUITY & INCOME
     let balance = 0;
@@ -204,8 +205,8 @@ export const getGeneralLedger = asyncHandler(async (req: Request, res: Response)
     select: { debit: true, credit: true },
   });
 
-  const priorDebits = priorLines.reduce((s, l) => s + l.debit, 0);
-  const priorCredits = priorLines.reduce((s, l) => s + l.credit, 0);
+  const priorDebits = priorLines.reduce((s, l) => s + toNum(l.debit), 0);
+  const priorCredits = priorLines.reduce((s, l) => s + toNum(l.credit), 0);
   const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE';
   const openingBalance = isDebitNormal ? priorDebits - priorCredits : priorCredits - priorDebits;
 
@@ -238,9 +239,9 @@ export const getGeneralLedger = asyncHandler(async (req: Request, res: Response)
   let runningBalance = openingBalance;
   const ledgerLines = periodLines.map((line) => {
     if (isDebitNormal) {
-      runningBalance += line.debit - line.credit;
+      runningBalance += toNum(line.debit) - toNum(line.credit);
     } else {
-      runningBalance += line.credit - line.debit;
+      runningBalance += toNum(line.credit) - toNum(line.debit);
     }
 
     return {
@@ -249,8 +250,8 @@ export const getGeneralLedger = asyncHandler(async (req: Request, res: Response)
       entryDescription: line.journalEntry.description,
       lineDescription: line.description,
       referenceType: line.journalEntry.referenceType,
-      debit: line.debit,
-      credit: line.credit,
+      debit: toNum(line.debit),
+      credit: toNum(line.credit),
       runningBalance,
     };
   });
@@ -267,8 +268,8 @@ export const getGeneralLedger = asyncHandler(async (req: Request, res: Response)
     openingBalance,
     lines: ledgerLines,
     closingBalance: runningBalance,
-    totalPeriodDebits: periodLines.reduce((s, l) => s + l.debit, 0),
-    totalPeriodCredits: periodLines.reduce((s, l) => s + l.credit, 0),
+    totalPeriodDebits: periodLines.reduce((s, l) => s + toNum(l.debit), 0),
+    totalPeriodCredits: periodLines.reduce((s, l) => s + toNum(l.credit), 0),
   });
 });
 
@@ -301,7 +302,7 @@ export const getCashBook = asyncHandler(async (req: Request, res: Response) => {
     },
     select: { debit: true, credit: true },
   });
-  const openingBalance = prior.reduce((s, l) => s + l.debit - l.credit, 0);
+  const openingBalance = prior.reduce((s, l) => s + toNum(l.debit) - toNum(l.credit), 0);
 
   // Period entries
   const periodLines = await prisma.journalEntryLine.findMany({
@@ -319,20 +320,20 @@ export const getCashBook = asyncHandler(async (req: Request, res: Response) => {
 
   let runningBalance = openingBalance;
   const lines = periodLines.map((l) => {
-    runningBalance += l.debit - l.credit;
+    runningBalance += toNum(l.debit) - toNum(l.credit);
     return {
       id: l.id,
       date: l.journalEntry.entryDate,
       particulars: l.description || l.journalEntry.description,
-      type: l.debit > 0 ? 'RECEIPT' : 'PAYMENT',
-      debit: l.debit,
-      credit: l.credit,
+      type: toNum(l.debit) > 0 ? 'RECEIPT' : 'PAYMENT',
+      debit: toNum(l.debit),
+      credit: toNum(l.credit),
       runningBalance,
     };
   });
 
-  const totalReceipts = periodLines.reduce((s, l) => s + l.debit, 0);
-  const totalDisbursements = periodLines.reduce((s, l) => s + l.credit, 0);
+  const totalReceipts = periodLines.reduce((s, l) => s + toNum(l.debit), 0);
+  const totalDisbursements = periodLines.reduce((s, l) => s + toNum(l.credit), 0);
 
   sendSuccess(res, {
     account: cashAccount,
@@ -373,7 +374,7 @@ export const getBankBook = asyncHandler(async (req: Request, res: Response) => {
     },
     select: { debit: true, credit: true },
   });
-  const openingBalance = prior.reduce((s, l) => s + l.debit - l.credit, 0);
+  const openingBalance = prior.reduce((s, l) => s + toNum(l.debit) - toNum(l.credit), 0);
 
   // Period entries
   const periodLines = await prisma.journalEntryLine.findMany({
@@ -391,20 +392,20 @@ export const getBankBook = asyncHandler(async (req: Request, res: Response) => {
 
   let runningBalance = openingBalance;
   const lines = periodLines.map((l) => {
-    runningBalance += l.debit - l.credit;
+    runningBalance += toNum(l.debit) - toNum(l.credit);
     return {
       id: l.id,
       date: l.journalEntry.entryDate,
       particulars: l.description || l.journalEntry.description,
-      type: l.debit > 0 ? 'DEPOSIT' : 'WITHDRAWAL',
-      debit: l.debit,
-      credit: l.credit,
+      type: toNum(l.debit) > 0 ? 'DEPOSIT' : 'WITHDRAWAL',
+      debit: toNum(l.debit),
+      credit: toNum(l.credit),
       runningBalance,
     };
   });
 
-  const totalDeposits = periodLines.reduce((s, l) => s + l.debit, 0);
-  const totalWithdrawals = periodLines.reduce((s, l) => s + l.credit, 0);
+  const totalDeposits = periodLines.reduce((s, l) => s + toNum(l.debit), 0);
+  const totalWithdrawals = periodLines.reduce((s, l) => s + toNum(l.credit), 0);
 
   sendSuccess(res, {
     account: bankAccount,
@@ -436,8 +437,8 @@ export const getTrialBalance = asyncHandler(async (req: Request, res: Response) 
   let netCreditBalancesTotal = 0;
 
   const trialBalance = accounts.map((acc) => {
-    const totalDebit = acc.lines.reduce((sum, l) => sum + (l.debit || 0), 0);
-    const totalCredit = acc.lines.reduce((sum, l) => sum + (l.credit || 0), 0);
+    const totalDebit = acc.lines.reduce((sum, l) => sum + toNum(l.debit), 0);
+    const totalCredit = acc.lines.reduce((sum, l) => sum + toNum(l.credit), 0);
     const diff = totalDebit - totalCredit;
 
     grandTotalDebits += totalDebit;
@@ -511,8 +512,8 @@ export const getProfitAndLoss = asyncHandler(async (req: Request, res: Response)
   });
 
   const revenues = incomeAccounts.map((acc) => {
-    const totalCredit = acc.lines.reduce((s, l) => s + l.credit, 0);
-    const totalDebit = acc.lines.reduce((s, l) => s + l.debit, 0);
+    const totalCredit = acc.lines.reduce((s, l) => s + toNum(l.credit), 0);
+    const totalDebit = acc.lines.reduce((s, l) => s + toNum(l.debit), 0);
     return {
       id: acc.id,
       code: acc.code,
@@ -522,8 +523,8 @@ export const getProfitAndLoss = asyncHandler(async (req: Request, res: Response)
   });
 
   const expenses = expenseAccounts.map((acc) => {
-    const totalDebit = acc.lines.reduce((s, l) => s + l.debit, 0);
-    const totalCredit = acc.lines.reduce((s, l) => s + l.credit, 0);
+    const totalDebit = acc.lines.reduce((s, l) => s + toNum(l.debit), 0);
+    const totalCredit = acc.lines.reduce((s, l) => s + toNum(l.credit), 0);
     return {
       id: acc.id,
       code: acc.code,
@@ -581,8 +582,8 @@ export const getBalanceSheet = asyncHandler(async (req: Request, res: Response) 
   let totalExpense = 0;
 
   for (const acc of accounts) {
-    const totalDebit = acc.lines.reduce((s, l) => s + l.debit, 0);
-    const totalCredit = acc.lines.reduce((s, l) => s + l.credit, 0);
+    const totalDebit = acc.lines.reduce((s, l) => s + toNum(l.debit), 0);
+    const totalCredit = acc.lines.reduce((s, l) => s + toNum(l.credit), 0);
 
     if (acc.type === 'ASSET') {
       const balance = totalDebit - totalCredit;
@@ -649,12 +650,12 @@ export const getAccountsReceivable = asyncHandler(async (req: Request, res: Resp
 
   const report = customers
     .map((cust) => {
-      const totalInvoiced = cust.salesInvoices.reduce((s, inv) => s + inv.totalAmount, 0);
-      const totalPaid = cust.salesInvoices.reduce((s, inv) => s + inv.paidAmount, 0);
-      const currentOutstanding = cust.openingBalance + (totalInvoiced - totalPaid);
+      const totalInvoiced = cust.salesInvoices.reduce((s, inv) => s + toNum(inv.totalAmount), 0);
+      const totalPaid = cust.salesInvoices.reduce((s, inv) => s + toNum(inv.paidAmount), 0);
+      const currentOutstanding = toNum(cust.openingBalance) + (totalInvoiced - totalPaid);
 
       const pendingInvoices = cust.salesInvoices.filter(
-        (inv) => inv.status !== 'PAID' && inv.totalAmount > inv.paidAmount
+        (inv) => inv.status !== 'PAID' && toNum(inv.totalAmount) > toNum(inv.paidAmount)
       );
 
       return {
@@ -663,7 +664,7 @@ export const getAccountsReceivable = asyncHandler(async (req: Request, res: Resp
         phone: cust.phone,
         email: cust.email,
         gstin: cust.gstin,
-        openingBalance: cust.openingBalance,
+        openingBalance: toNum(cust.openingBalance),
         totalInvoiced,
         totalPaid,
         currentOutstanding,
@@ -708,12 +709,12 @@ export const getAccountsPayable = asyncHandler(async (req: Request, res: Respons
 
   const report = suppliers
     .map((sup) => {
-      const totalPurchased = sup.purchaseBills.reduce((s, b) => s + b.totalAmount, 0);
-      const totalPaid = sup.purchaseBills.reduce((s, b) => s + b.paidAmount, 0);
-      const currentPayable = sup.openingBalance + (totalPurchased - totalPaid);
+      const totalPurchased = sup.purchaseBills.reduce((s, b) => s + toNum(b.totalAmount), 0);
+      const totalPaid = sup.purchaseBills.reduce((s, b) => s + toNum(b.paidAmount), 0);
+      const currentPayable = toNum(sup.openingBalance) + (totalPurchased - totalPaid);
 
       const pendingBills = sup.purchaseBills.filter(
-        (b) => b.status !== 'PAID' && b.totalAmount > b.paidAmount
+        (b) => b.status !== 'PAID' && toNum(b.totalAmount) > toNum(b.paidAmount)
       );
 
       return {
@@ -722,7 +723,7 @@ export const getAccountsPayable = asyncHandler(async (req: Request, res: Respons
         phone: sup.phone,
         email: sup.email,
         gstin: sup.gstin,
-        openingBalance: sup.openingBalance,
+        openingBalance: toNum(sup.openingBalance),
         totalPurchased,
         totalPaid,
         currentPayable,

@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 export const listPayments = asyncHandler(async (req: Request, res: Response) => {
   const { type, method, customerId, supplierId, search, page = '1', limit = '50', from, to } =
@@ -96,7 +97,7 @@ export const getOutstandingDues = asyncHandler(async (req: Request, res: Respons
 
     const dues = invoices.map((inv) => ({
       ...inv,
-      dueAmount: Math.max(0, inv.totalAmount - inv.paidAmount),
+      dueAmount: Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount)),
     }));
 
     sendSuccess(res, dues);
@@ -125,7 +126,7 @@ export const getOutstandingDues = asyncHandler(async (req: Request, res: Respons
 
     const dues = bills.map((b) => ({
       ...b,
-      dueAmount: Math.max(0, b.totalAmount - b.paidAmount),
+      dueAmount: Math.max(0, toNum(b.totalAmount) - toNum(b.paidAmount)),
     }));
 
     sendSuccess(res, dues);
@@ -164,8 +165,8 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
             where: { id: alloc.invoiceOrBillId, businessId, deletedAt: null },
           });
           if (inv) {
-            const newPaid = inv.paidAmount + alloc.amount;
-            const newStatus = newPaid >= inv.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : inv.status;
+            const newPaid = toNum(inv.paidAmount) + alloc.amount;
+            const newStatus = newPaid >= toNum(inv.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : inv.status;
             await tx.salesInvoice.update({
               where: { id: inv.id },
               data: { paidAmount: newPaid, status: newStatus },
@@ -179,8 +180,8 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
           where: { id: salesInvoiceId, businessId, deletedAt: null },
         });
         if (inv) {
-          const newPaid = inv.paidAmount + amount;
-          const newStatus = newPaid >= inv.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : inv.status;
+          const newPaid = toNum(inv.paidAmount) + amount;
+          const newStatus = newPaid >= toNum(inv.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : inv.status;
           await tx.salesInvoice.update({
             where: { id: inv.id },
             data: { paidAmount: newPaid, status: newStatus },
@@ -201,12 +202,12 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
 
         for (const inv of pendingInvoices) {
           if (remainingToAllocate <= 0) break;
-          const due = Math.max(0, inv.totalAmount - inv.paidAmount);
+          const due = Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount));
           if (due <= 0) continue;
 
           const allocAmount = Math.min(due, remainingToAllocate);
-          const newPaid = inv.paidAmount + allocAmount;
-          const newStatus = newPaid >= inv.totalAmount ? 'PAID' : 'PARTIAL';
+          const newPaid = toNum(inv.paidAmount) + allocAmount;
+          const newStatus = newPaid >= toNum(inv.totalAmount) ? 'PAID' : 'PARTIAL';
 
           await tx.salesInvoice.update({
             where: { id: inv.id },
@@ -227,8 +228,8 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
             where: { id: alloc.invoiceOrBillId, businessId, deletedAt: null },
           });
           if (bill) {
-            const newPaid = bill.paidAmount + alloc.amount;
-            const newStatus = newPaid >= bill.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : bill.status;
+            const newPaid = toNum(bill.paidAmount) + alloc.amount;
+            const newStatus = newPaid >= toNum(bill.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : bill.status;
             await tx.purchaseBill.update({
               where: { id: bill.id },
               data: { paidAmount: newPaid, status: newStatus },
@@ -241,8 +242,8 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
           where: { id: purchaseBillId, businessId, deletedAt: null },
         });
         if (bill) {
-          const newPaid = bill.paidAmount + amount;
-          const newStatus = newPaid >= bill.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : bill.status;
+          const newPaid = toNum(bill.paidAmount) + amount;
+          const newStatus = newPaid >= toNum(bill.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : bill.status;
           await tx.purchaseBill.update({
             where: { id: bill.id },
             data: { paidAmount: newPaid, status: newStatus },
@@ -263,12 +264,12 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
 
         for (const bill of pendingBills) {
           if (remainingToAllocate <= 0) break;
-          const due = Math.max(0, bill.totalAmount - bill.paidAmount);
+          const due = Math.max(0, toNum(bill.totalAmount) - toNum(bill.paidAmount));
           if (due <= 0) continue;
 
           const allocAmount = Math.min(due, remainingToAllocate);
-          const newPaid = bill.paidAmount + allocAmount;
-          const newStatus = newPaid >= bill.totalAmount ? 'PAID' : 'PARTIAL';
+          const newPaid = toNum(bill.paidAmount) + allocAmount;
+          const newStatus = newPaid >= toNum(bill.totalAmount) ? 'PAID' : 'PARTIAL';
 
           await tx.purchaseBill.update({
             where: { id: bill.id },
@@ -304,11 +305,17 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
       },
     });
 
-    // 4. Double-entry general ledger posting
-    const cashAccount = await tx.account.findFirst({ where: { businessId, code: '1001' } });
-    const bankAccount = await tx.account.findFirst({ where: { businessId, code: '1002' } });
-    const arAccount   = await tx.account.findFirst({ where: { businessId, code: '1100' } });
-    const apAccount   = await tx.account.findFirst({ where: { businessId, code: '2100' } });
+    // 4. Double-entry general ledger posting (batch query accounts)
+    const accountList = await tx.account.findMany({
+      where: {
+        businessId,
+        code: { in: ['1001', '1002', '1100', '2100'] },
+      },
+    });
+    const cashAccount = accountList.find((a: any) => a.code === '1001');
+    const bankAccount = accountList.find((a: any) => a.code === '1002');
+    const arAccount   = accountList.find((a: any) => a.code === '1100');
+    const apAccount   = accountList.find((a: any) => a.code === '2100');
 
     const isBankMethod = ['BANK', 'UPI', 'CHEQUE', 'CARD', 'NEFT', 'RTGS'].includes(method);
     const monetaryAccount = (isBankMethod && bankAccount) ? bankAccount : (cashAccount || bankAccount);
@@ -372,7 +379,7 @@ export const createPayment = asyncHandler(async (req: Request, res: Response) =>
     }
 
     return created;
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendCreated(res, payment, 'Payment recorded successfully');
 });
@@ -392,8 +399,8 @@ export const deletePayment = asyncHandler(async (req: Request, res: Response) =>
     if (payment.salesInvoiceId) {
       const inv = await tx.salesInvoice.findUnique({ where: { id: payment.salesInvoiceId } });
       if (inv) {
-        const newPaid = Math.max(0, inv.paidAmount - payment.amount);
-        const newStatus = newPaid >= inv.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : 'SENT';
+        const newPaid = Math.max(0, toNum(inv.paidAmount) - toNum(payment.amount));
+        const newStatus = newPaid >= toNum(inv.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : 'SENT';
         await tx.salesInvoice.update({
           where: { id: inv.id },
           data: { paidAmount: newPaid, status: newStatus },
@@ -405,8 +412,8 @@ export const deletePayment = asyncHandler(async (req: Request, res: Response) =>
     if (payment.purchaseBillId) {
       const bill = await tx.purchaseBill.findUnique({ where: { id: payment.purchaseBillId } });
       if (bill) {
-        const newPaid = Math.max(0, bill.paidAmount - payment.amount);
-        const newStatus = newPaid >= bill.totalAmount ? 'PAID' : newPaid > 0 ? 'PARTIAL' : 'RECEIVED';
+        const newPaid = Math.max(0, toNum(bill.paidAmount) - toNum(payment.amount));
+        const newStatus = newPaid >= toNum(bill.totalAmount) ? 'PAID' : newPaid > 0 ? 'PARTIAL' : 'RECEIVED';
         await tx.purchaseBill.update({
           where: { id: bill.id },
           data: { paidAmount: newPaid, status: newStatus },
@@ -425,7 +432,7 @@ export const deletePayment = asyncHandler(async (req: Request, res: Response) =>
 
     // 4. Delete the payment record
     await tx.payment.delete({ where: { id: payment.id } });
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendNoContent(res);
 });

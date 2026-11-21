@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 /** GET /api/businesses/:businessId/suppliers */
 export const listSuppliers = asyncHandler(async (req: Request, res: Response) => {
@@ -50,10 +51,10 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
   // Compute live currentPayable for each supplier
   const suppliers = rawSuppliers.map((s) => {
     const billDue = s.purchaseBills.reduce(
-      (sum, bill) => sum + Math.max(0, bill.totalAmount - bill.paidAmount),
+      (sum, bill) => sum + Math.max(0, toNum(bill.totalAmount) - toNum(bill.paidAmount)),
       0
     );
-    const currentPayable = (s.openingBalance || 0) + billDue;
+    const currentPayable = toNum(s.openingBalance) + billDue;
 
     return {
       id: s.id,
@@ -62,7 +63,7 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
       email: s.email,
       address: s.address,
       gstin: s.gstin,
-      openingBalance: s.openingBalance,
+      openingBalance: toNum(s.openingBalance),
       currentPayable,
       billsCount: s.purchaseBills.length,
       createdAt: s.createdAt,
@@ -83,10 +84,10 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
 
   const totalPayables = allSuppliers.reduce((acc, s) => {
     const due = s.purchaseBills.reduce(
-      (sum, bill) => sum + Math.max(0, bill.totalAmount - bill.paidAmount),
+      (sum, bill) => sum + Math.max(0, toNum(bill.totalAmount) - toNum(bill.paidAmount)),
       0
     );
-    const payable = (s.openingBalance || 0) + due;
+    const payable = toNum(s.openingBalance) + due;
     return acc + (payable > 0 ? payable : 0);
   }, 0);
 
@@ -135,8 +136,8 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
   // Compute payable balance
   const billDue = supplier.purchaseBills
     .filter((b) => b.status !== 'CANCELLED')
-    .reduce((sum, b) => sum + Math.max(0, b.totalAmount - b.paidAmount), 0);
-  const currentPayable = (supplier.openingBalance || 0) + billDue;
+    .reduce((sum, b) => sum + Math.max(0, toNum(b.totalAmount) - toNum(b.paidAmount)), 0);
+  const currentPayable = toNum(supplier.openingBalance) + billDue;
 
   // Build Chronological Party Ledger
   interface LedgerEntry {
@@ -152,14 +153,15 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
   const rawEntries: { date: Date; type: 'OPENING' | 'BILL' | 'PAYMENT'; refNo: string; description: string; debit: number; credit: number }[] = [];
 
   // 1. Opening Balance (Credit to supplier payable)
-  if (supplier.openingBalance !== 0) {
+  const supOpening = toNum(supplier.openingBalance);
+  if (supOpening !== 0) {
     rawEntries.push({
       date: supplier.createdAt,
       type: 'OPENING',
       refNo: 'OPENING',
       description: 'Opening Balance',
-      debit: supplier.openingBalance < 0 ? Math.abs(supplier.openingBalance) : 0,
-      credit: supplier.openingBalance > 0 ? supplier.openingBalance : 0,
+      debit: supOpening < 0 ? Math.abs(supOpening) : 0,
+      credit: supOpening > 0 ? supOpening : 0,
     });
   }
 
@@ -172,7 +174,7 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
       refNo: bill.billNumber,
       description: `Purchase Bill #${bill.billNumber} (${bill.status})`,
       debit: 0,
-      credit: bill.totalAmount,
+      credit: toNum(bill.totalAmount),
     });
   }
 
@@ -183,7 +185,7 @@ export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
       type: 'PAYMENT',
       refNo: p.reference || 'PAYMENT',
       description: `Payment Made (${p.method})${p.notes ? ' - ' + p.notes : ''}`,
-      debit: p.amount,
+      debit: toNum(p.amount),
       credit: 0,
     });
   }

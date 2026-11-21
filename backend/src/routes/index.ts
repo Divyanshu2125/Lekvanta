@@ -12,6 +12,7 @@ import expenseRoutes from './expense.routes';
 import accountingRoutes from './accounting.routes';
 import dashboardRoutes from './dashboard.routes';
 import reportsRoutes from './reports.routes';
+import serviceRoutes from './service.routes';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use('/businesses/:businessId/purchases', purchaseRoutes);
 router.use('/businesses/:businessId/purchase-bills', purchaseRoutes);
 router.use('/businesses/:businessId/payments', paymentRoutes);
 router.use('/businesses/:businessId/expenses', expenseRoutes);
+router.use('/businesses/:businessId/services', serviceRoutes);
 router.use('/businesses/:businessId/accounting', accountingRoutes);
 router.use('/businesses/:businessId/dashboard', dashboardRoutes);
 router.use('/businesses/:businessId/reports', reportsRoutes);

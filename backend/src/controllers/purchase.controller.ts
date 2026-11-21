@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 // ── GST Helper ────────────────────────────────────────────────────────────────
 
@@ -244,12 +245,25 @@ export const createPurchaseBill = asyncHandler(async (req: Request, res: Respons
     const isConfirmed = finalStatus !== 'DRAFT';
 
     if (isConfirmed) {
+      const itemIds = lineItems.map((l) => l.itemId).filter(Boolean) as string[];
+      const itemMap = new Map<string, any>();
+      if (itemIds.length > 0) {
+        const uniqueItemIds = Array.from(new Set(itemIds));
+        const itemsFromDb = await tx.item.findMany({
+          where: { id: { in: uniqueItemIds }, businessId },
+        });
+        itemsFromDb.forEach((it: any) => itemMap.set(it.id, it));
+      }
+
       for (const line of lineItems) {
         if (!line.itemId) continue;
-        const item = await tx.item.findUnique({ where: { id: line.itemId } });
+        const item = itemMap.get(line.itemId);
         if (!item || !item.trackInventory) continue;
 
-        const newStock = item.currentStock + line.quantity;
+        const currentStockNum = toNum(item.currentStock);
+        const newStock = currentStockNum + line.quantity;
+        item.currentStock = newStock;
+
         await tx.item.update({
           where: { id: item.id },
           data: { currentStock: newStock, purchasePrice: line.unitPrice },
@@ -263,19 +277,25 @@ export const createPurchaseBill = asyncHandler(async (req: Request, res: Respons
             referenceId: created.id,
             referenceType: 'PurchaseBill',
             quantity: line.quantity,
-            previousStock: item.currentStock,
+            previousStock: currentStockNum,
             newStock,
             notes: `Purchase — Bill ${billNumber}`,
           },
         });
       }
 
-      // Double-entry journal: Debit Purchases+ITC, Credit AP; then if paid: Debit AP, Credit Cash/Bank
-      const apAccount    = await tx.account.findFirst({ where: { businessId, code: '2100' } });
-      const stockAccount = await tx.account.findFirst({ where: { businessId, code: '1200' } });
-      const itcAccount   = await tx.account.findFirst({ where: { businessId, code: '1301' } });
-      const cashAccount  = await tx.account.findFirst({ where: { businessId, code: '1001' } });
-      const bankAccount  = await tx.account.findFirst({ where: { businessId, code: '1002' } });
+      // Double-entry journal: Debit Purchases+ITC, Credit AP; then if paid: Debit AP, Credit Cash/Bank (batch queried)
+      const accountList = await tx.account.findMany({
+        where: {
+          businessId,
+          code: { in: ['2100', '1200', '1301', '1001', '1002', '5900'] },
+        },
+      });
+      const apAccount    = accountList.find((a: any) => a.code === '2100');
+      const stockAccount = accountList.find((a: any) => a.code === '1200');
+      const itcAccount   = accountList.find((a: any) => a.code === '1301');
+      const cashAccount  = accountList.find((a: any) => a.code === '1001');
+      const bankAccount  = accountList.find((a: any) => a.code === '1002');
 
       if (apAccount && stockAccount) {
         const jeLines: any[] = [];
@@ -362,7 +382,7 @@ export const createPurchaseBill = asyncHandler(async (req: Request, res: Respons
     }
 
     return created;
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendCreated(res, bill, `Purchase bill ${bill.billNumber} recorded successfully`);
 });
@@ -403,7 +423,7 @@ export const cancelPurchaseBill = asyncHandler(async (req: Request, res: Respons
         const item = await tx.item.findUnique({ where: { id: line.itemId } });
         if (!item || !item.trackInventory) continue;
 
-        const restoredStock = item.currentStock - line.quantity;
+        const restoredStock = toNum(item.currentStock) - toNum(line.quantity);
         await tx.item.update({
           where: { id: item.id },
           data: { currentStock: Math.max(0, restoredStock) },
@@ -416,8 +436,8 @@ export const cancelPurchaseBill = asyncHandler(async (req: Request, res: Respons
             type: 'RETURN_OUT',
             referenceId: bill.id,
             referenceType: 'PurchaseBill',
-            quantity: -line.quantity,
-            previousStock: item.currentStock,
+            quantity: -toNum(line.quantity),
+            previousStock: toNum(item.currentStock),
             newStock: Math.max(0, restoredStock),
             notes: `Stock reversed from cancelled purchase ${bill.billNumber}`,
           },
@@ -456,7 +476,7 @@ export const cancelPurchaseBill = asyncHandler(async (req: Request, res: Respons
       where: { id: billId },
       data: { status: 'CANCELLED' },
     });
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendSuccess(res, null, 'Purchase bill cancelled. Stock and financial ledgers have been safely reversed.');
 });

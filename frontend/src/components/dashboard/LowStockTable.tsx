@@ -1,4 +1,3 @@
-import { lowStockItems as defaultLowStock } from '@/lib/data';
 import { AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -12,7 +11,7 @@ interface LowStockItem {
 }
 
 export default function LowStockTable({
-  items = defaultLowStock,
+  items = [],
 }: {
   items?: LowStockItem[];
 }) {

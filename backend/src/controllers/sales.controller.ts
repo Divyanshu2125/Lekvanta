@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 // ── GST Helper ────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,10 @@ export const getSalesInvoice = asyncHandler(async (req: Request, res: Response) 
           state: true,
           pincode: true,
           logoUrl: true,
+          bankAccounts: {
+            where: { deletedAt: null },
+            orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+          },
         },
       },
     },
@@ -221,6 +226,38 @@ export const createSalesInvoice = asyncHandler(async (req: Request, res: Respons
     }
 
     const customerId = invoiceData.customerId || null;
+    const isConfirmedSale = finalStatus !== 'DRAFT' && !isQuotationOrEstimate;
+
+    // Batch fetch inventory items to minimize round trips and prevent transaction timeouts
+    const itemIds = lineItems.map((l) => l.itemId).filter(Boolean) as string[];
+    const itemMap = new Map<string, any>();
+    if (itemIds.length > 0) {
+      const uniqueItemIds = Array.from(new Set(itemIds));
+      const itemsFromDb = await tx.item.findMany({
+        where: { id: { in: uniqueItemIds }, businessId },
+      });
+      itemsFromDb.forEach((it: any) => itemMap.set(it.id, it));
+    }
+
+    // Validate available stock before creating bill / invoice
+    if (isConfirmedSale && itemIds.length > 0) {
+      const itemQtyMap = new Map<string, number>();
+      for (const line of lineItems) {
+        if (!line.itemId) continue;
+        itemQtyMap.set(line.itemId, (itemQtyMap.get(line.itemId) || 0) + line.quantity);
+      }
+
+      for (const [itemId, requestedQty] of itemQtyMap.entries()) {
+        const item = itemMap.get(itemId);
+        if (!item || !item.trackInventory) continue;
+
+        if (requestedQty > toNum(item.currentStock)) {
+          throw AppError.badRequest(
+            `Insufficient Stock! Only ${toNum(item.currentStock)} units available for "${item.name}".`
+          );
+        }
+      }
+    }
 
     // Create invoice + line items
     const created = await tx.salesInvoice.create({
@@ -265,16 +302,17 @@ export const createSalesInvoice = asyncHandler(async (req: Request, res: Respons
       });
     }
 
-    // Update stock only for confirmed invoices (not DRAFT, not ESTIMATE, not QUOTATION)
-    const isConfirmedSale = finalStatus !== 'DRAFT' && !isQuotationOrEstimate;
-
-    if (isConfirmedSale) {
+    // Deduct stock only after successful bill creation (not DRAFT, not ESTIMATE, not QUOTATION)
+    if (isConfirmedSale && itemIds.length > 0) {
       for (const line of lineItems) {
         if (!line.itemId) continue;
-        const item = await tx.item.findUnique({ where: { id: line.itemId } });
+        const item = itemMap.get(line.itemId);
         if (!item || !item.trackInventory) continue;
 
-        const newStock = item.currentStock - line.quantity;
+        const currentStockNum = toNum(item.currentStock);
+        const newStock = currentStockNum - line.quantity;
+        item.currentStock = newStock; // update local cached copy in case of multiple lines for same item
+
         await tx.item.update({
           where: { id: item.id },
           data: { currentStock: newStock },
@@ -288,21 +326,28 @@ export const createSalesInvoice = asyncHandler(async (req: Request, res: Respons
             referenceId: created.id,
             referenceType: 'SalesInvoice',
             quantity: -line.quantity,
-            previousStock: item.currentStock,
+            previousStock: currentStockNum,
             newStock,
             notes: `Sale — Invoice ${invoiceNumber}`,
           },
         });
       }
 
-      // Record double-entry financial transaction
-      const arAccount = await tx.account.findFirst({ where: { businessId, code: '1100' } }); // AR
-      const cashAccount = await tx.account.findFirst({ where: { businessId, code: '1001' } }); // Cash
-      const bankAccount = await tx.account.findFirst({ where: { businessId, code: '1002' } }); // Bank
-      const salesAccount = await tx.account.findFirst({ where: { businessId, code: '4001' } }); // Sales
-      const cgstAccount = await tx.account.findFirst({ where: { businessId, code: '2201' } });
-      const sgstAccount = await tx.account.findFirst({ where: { businessId, code: '2202' } });
-      const igstAccount = await tx.account.findFirst({ where: { businessId, code: '2203' } });
+      // Record double-entry financial transaction (batch query accounts to reduce cloud database round trips)
+      const accountList = await tx.account.findMany({
+        where: {
+          businessId,
+          code: { in: ['1100', '1001', '1002', '4001', '2201', '2202', '2203', '5900'] },
+        },
+      });
+      const arAccount = accountList.find((a: any) => a.code === '1100');
+      const cashAccount = accountList.find((a: any) => a.code === '1001');
+      const bankAccount = accountList.find((a: any) => a.code === '1002');
+      const salesAccount = accountList.find((a: any) => a.code === '4001');
+      const cgstAccount = accountList.find((a: any) => a.code === '2201');
+      const sgstAccount = accountList.find((a: any) => a.code === '2202');
+      const igstAccount = accountList.find((a: any) => a.code === '2203');
+      const roundAccDef = accountList.find((a: any) => a.code === '5900') || salesAccount;
 
       if (salesAccount) {
         const jeLines: any[] = [];
@@ -361,7 +406,7 @@ export const createSalesInvoice = asyncHandler(async (req: Request, res: Respons
         const roundingDiff = totalDebit - totalCredit;
 
         if (Math.abs(roundingDiff) > 0.001) {
-          const roundAcc = await tx.account.findFirst({ where: { businessId, code: '5900' } }) || salesAccount;
+          const roundAcc = roundAccDef;
           if (roundAcc) {
             if (roundingDiff < 0) {
               jeLines.push({ accountId: roundAcc.id, debit: Math.abs(roundingDiff), credit: 0, description: 'Round Off' });
@@ -385,7 +430,7 @@ export const createSalesInvoice = asyncHandler(async (req: Request, res: Respons
     }
 
     return created;
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendCreated(res, invoice, `Invoice ${invoice.invoiceNumber} generated successfully`);
 });
@@ -427,7 +472,7 @@ export const cancelSalesInvoice = asyncHandler(async (req: Request, res: Respons
         const item = await tx.item.findUnique({ where: { id: line.itemId } });
         if (!item || !item.trackInventory) continue;
 
-        const restoredStock = item.currentStock + line.quantity;
+        const restoredStock = toNum(item.currentStock) + toNum(line.quantity);
         await tx.item.update({
           where: { id: item.id },
           data: { currentStock: restoredStock },
@@ -440,8 +485,8 @@ export const cancelSalesInvoice = asyncHandler(async (req: Request, res: Respons
             type: 'RETURN_IN',
             referenceId: invoice.id,
             referenceType: 'SalesInvoice',
-            quantity: line.quantity,
-            previousStock: item.currentStock,
+            quantity: toNum(line.quantity),
+            previousStock: toNum(item.currentStock),
             newStock: restoredStock,
             notes: `Stock restored from cancelled invoice ${invoice.invoiceNumber}`,
           },
@@ -481,7 +526,7 @@ export const cancelSalesInvoice = asyncHandler(async (req: Request, res: Respons
       where: { id: invoiceId },
       data: { status: 'CANCELLED' },
     });
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendSuccess(res, null, 'Invoice cancelled. Stock and financial ledgers have been safely reversed.');
 });

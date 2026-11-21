@@ -14,6 +14,7 @@
     "db:seed": "ts-node-dev --transpile-only prisma/seed.ts"
   },
   "dependencies": {
+    "@descope/node-sdk": "^2.22.0",
     "@prisma/client": "^5.15.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -35,4 +36,3 @@
     "typescript": "^5.5.3"
   }
 }
-

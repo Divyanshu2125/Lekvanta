@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../services/prisma';
 import { sendSuccess } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 export const getDashboardSummary = asyncHandler(async (req: Request, res: Response) => {
   const businessId = req.businessId!;
@@ -12,6 +13,23 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
 
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
+
+  // 6-Month Sales & Purchases Trend Calculation
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const chartMonths: { month: string; start: Date; end: Date }[] = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const start = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    chartMonths.push({
+      month: monthNames[d.getMonth()],
+      start,
+      end,
+    });
+  }
+
+  const sixMonthsAgo = chartMonths[0].start;
 
   // Run database aggregations concurrently
   const [
@@ -27,6 +45,8 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
     topSellingItemsRaw,
     recentSales,
     recentPurchases,
+    trendSales,
+    trendPurchases,
   ] = await Promise.all([
     // Today's Sales
     prisma.salesInvoice.aggregate({
@@ -147,33 +167,55 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
       take: 5,
       include: { supplier: { select: { name: true } } },
     }),
+
+    // 6-Month sales for trend
+    prisma.salesInvoice.findMany({
+      where: {
+        businessId,
+        invoiceDate: { gte: sixMonthsAgo },
+        deletedAt: null,
+        status: { not: 'CANCELLED' },
+      },
+      select: { invoiceDate: true, totalAmount: true },
+    }),
+
+    // 6-Month purchases for trend
+    prisma.purchaseBill.findMany({
+      where: {
+        businessId,
+        billDate: { gte: sixMonthsAgo },
+        deletedAt: null,
+        status: { not: 'CANCELLED' },
+      },
+      select: { billDate: true, totalAmount: true },
+    }),
   ]);
 
   // Compute Receivables
   const totalReceivables = allInvoices.reduce(
-    (acc, inv) => acc + Math.max(0, inv.totalAmount - inv.paidAmount),
+    (acc, inv) => acc + Math.max(0, toNum(inv.totalAmount) - toNum(inv.paidAmount)),
     0
   );
 
   // Compute Payables
   const totalPayables = allBills.reduce(
-    (acc, bill) => acc + Math.max(0, bill.totalAmount - bill.paidAmount),
+    (acc, bill) => acc + Math.max(0, toNum(bill.totalAmount) - toNum(bill.paidAmount)),
     0
   );
 
   // Calculate Cash in Hand balance
   const cashBalance = cashAccount
-    ? cashAccount.lines.reduce((acc, l) => acc + (l.debit - l.credit), 0)
+    ? cashAccount.lines.reduce((acc, l) => acc + (toNum(l.debit) - toNum(l.credit)), 0)
     : 0;
 
   // Calculate Bank balance
   const bankBalance = bankAccount
-    ? bankAccount.lines.reduce((acc, l) => acc + (l.debit - l.credit), 0)
+    ? bankAccount.lines.reduce((acc, l) => acc + (toNum(l.debit) - toNum(l.credit)), 0)
     : 0;
 
   // Gross profit calculation
-  const totalSalesVal = allSalesAgg._sum.subtotal || 0;
-  const totalPurchaseVal = allPurchasesAgg._sum.subtotal || 0;
+  const totalSalesVal = toNum(allSalesAgg._sum.subtotal);
+  const totalPurchaseVal = toNum(allPurchasesAgg._sum.subtotal);
   const grossProfit = Math.max(0, totalSalesVal - totalPurchaseVal);
 
   // Merge recent transactions
@@ -183,7 +225,7 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
       type: 'sale' as const,
       party: s.customer?.name || 'Cash Customer',
       date: s.invoiceDate.toISOString().split('T')[0],
-      amount: s.totalAmount,
+      amount: toNum(s.totalAmount),
       status: s.status.toLowerCase(),
       createdAt: s.createdAt,
     })),
@@ -192,7 +234,7 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
       type: 'purchase' as const,
       party: p.supplier?.name || 'Cash Supplier',
       date: p.billDate.toISOString().split('T')[0],
-      amount: p.totalAmount,
+      amount: toNum(p.totalAmount),
       status: p.status.toLowerCase(),
       createdAt: p.createdAt,
     })),
@@ -202,14 +244,14 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
 
   // Format low stock
   const formattedLowStock = lowStockItems
-    .filter((item) => item.currentStock <= item.minStock)
+    .filter((item) => toNum(item.currentStock) <= toNum(item.minStock))
     .slice(0, 5)
     .map((item) => ({
       id: item.id,
       name: item.name,
       sku: item.sku || '-',
-      stock: item.currentStock,
-      minStock: item.minStock,
+      stock: toNum(item.currentStock),
+      minStock: toNum(item.minStock),
       unit: item.unit?.shortName || 'Pcs',
     }));
 
@@ -217,15 +259,26 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
   const formattedTopSelling = topSellingItemsRaw.map((item, idx) => ({
     id: item.itemId || String(idx),
     name: item.description,
-    qty: item._sum.quantity || 0,
-    revenue: item._sum.amount || 0,
+    qty: toNum(item._sum.quantity),
+    revenue: toNum(item._sum.amount),
     trend: 'up' as const,
   }));
 
+  // Compute monthly trends for chart
+  const salesChart = chartMonths.map(({ month, start, end }) => {
+    const sTotal = trendSales
+      .filter((s) => s.invoiceDate >= start && s.invoiceDate <= end)
+      .reduce((sum, s) => sum + toNum(s.totalAmount), 0);
+    const pTotal = trendPurchases
+      .filter((p) => p.billDate >= start && p.billDate <= end)
+      .reduce((sum, p) => sum + toNum(p.totalAmount), 0);
+    return { month, sales: sTotal, purchases: pTotal };
+  });
+
   sendSuccess(res, {
     metrics: {
-      todaySales: todaySalesAgg._sum.totalAmount || 0,
-      todayPurchases: todayPurchasesAgg._sum.totalAmount || 0,
+      todaySales: toNum(todaySalesAgg._sum.totalAmount),
+      todayPurchases: toNum(todayPurchasesAgg._sum.totalAmount),
       grossProfit,
       cashInHand: cashBalance,
       bankBalance,
@@ -235,6 +288,7 @@ export const getDashboardSummary = asyncHandler(async (req: Request, res: Respon
     recentTransactions: combinedTransactions,
     lowStockItems: formattedLowStock,
     topSellingItems: formattedTopSelling,
+    salesChart,
   });
 });
 

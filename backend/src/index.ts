@@ -7,7 +7,7 @@ import { env } from './config/env';
 import routes from './routes';
 import { errorHandler } from './middleware/errorHandler';
 import { AppError } from './utils/AppError';
-import prisma from './services/prisma';
+import prisma, { getDbHost, sanitizeDbUrl } from './services/prisma';
 
 const app = express();
 
@@ -56,14 +56,17 @@ app.get('*', (req, res, next) => {
 app.use(errorHandler);
 
 const server = app.listen(env.PORT, '127.0.0.1', async () => {
+  const host = getDbHost(process.env.DATABASE_URL);
+  console.log(`🚀 Lekvanta Backend running on http://127.0.0.1:${env.PORT}`);
+  console.log(`🗄️  Database Target: PostgreSQL (${host})`);
+  console.log(`🩺 Health check available at http://127.0.0.1:${env.PORT}/api/health`);
+
   try {
     await prisma.$connect();
-    console.log(`🚀 Lekvanta Backend running on http://127.0.0.1:${env.PORT}`);
-    console.log(`🗄️  Connected to SQLite database via Prisma`);
-    console.log(`🩺 Health check available at http://127.0.0.1:${env.PORT}/api/health`);
-  } catch (error) {
-    console.error('❌ Failed to connect to database:', error);
-    process.exit(1);
+    console.log(`✅ Successfully connected to Neon PostgreSQL database via Prisma`);
+  } catch (error: any) {
+    console.warn(`⚠️  Database connection pending or not yet reachable at ${host}.`);
+    console.warn(`   Configure your valid Neon DATABASE_URL with ?sslmode=require in backend/.env to connect.`);
   }
 });
 

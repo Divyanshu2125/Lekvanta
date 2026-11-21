@@ -3,6 +3,7 @@ import prisma from '../services/prisma';
 import { AppError } from '../utils/AppError';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/apiResponse';
 import { asyncHandler } from '../middleware/errorHandler';
+import { toNum } from '../utils/number';
 
 // ── Item Listing & Queries ────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ export const listItems = asyncHandler(async (req: Request, res: Response) => {
   let total = totalCount;
 
   if (stockStatus === 'low_stock') {
-    items = rawItems.filter((i) => i.currentStock <= i.minStock && i.currentStock > 0);
+    items = rawItems.filter((i) => toNum(i.currentStock) <= toNum(i.minStock) && toNum(i.currentStock) > 0);
     total = items.length;
   }
 
@@ -78,9 +79,9 @@ export const listItems = asyncHandler(async (req: Request, res: Response) => {
     select: { currentStock: true, minStock: true },
   });
   const lowStockCount = allBusinessItems.filter(
-    (i) => i.currentStock <= i.minStock && i.currentStock > 0
+    (i) => toNum(i.currentStock) <= toNum(i.minStock) && toNum(i.currentStock) > 0
   ).length;
-  const outOfStockCount = allBusinessItems.filter((i) => i.currentStock <= 0).length;
+  const outOfStockCount = allBusinessItems.filter((i) => toNum(i.currentStock) <= 0).length;
 
   sendSuccess(res, items, undefined, 200, {
     total,
@@ -161,7 +162,7 @@ export const createItem = asyncHandler(async (req: Request, res: Response) => {
     }
 
     return created;
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendCreated(res, item, 'Item created successfully');
 });
@@ -218,7 +219,7 @@ export const adjustStock = asyncHandler(async (req: Request, res: Response) => {
 
   const qty = Number(quantity);
   const delta = adjustmentType === 'ADD' ? qty : -qty;
-  const previousStock = item.currentStock;
+  const previousStock = toNum(item.currentStock);
   const newStock = previousStock + delta;
 
   if (newStock < 0) {
@@ -249,7 +250,7 @@ export const adjustStock = asyncHandler(async (req: Request, res: Response) => {
     });
 
     return { updated, movement };
-  });
+  }, { maxWait: 15000, timeout: 30000 });
 
   sendSuccess(res, result, `Stock adjusted successfully. New stock: ${newStock}`);
 });

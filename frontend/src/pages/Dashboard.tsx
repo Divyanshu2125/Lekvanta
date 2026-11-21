@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { statCards as defaultStatCards, recentTransactions as defaultTransactions, lowStockItems as defaultLowStock, topSellingItems as defaultTopSelling } from '@/lib/data';
 import StatCard from '@/components/dashboard/StatCard';
-import SalesChart from '@/components/dashboard/SalesChart';
+import SalesChart, { MonthlyTrend } from '@/components/dashboard/SalesChart';
 import RecentTransactions from '@/components/dashboard/RecentTransactions';
 import LowStockTable from '@/components/dashboard/LowStockTable';
 import TopSellingItems from '@/components/dashboard/TopSellingItems';
-import { Plus, FileText, ShoppingCart, Package, Users, Receipt, CreditCard, RefreshCw } from 'lucide-react';
+import { Plus, FileText, ShoppingCart, Package, Users, Receipt, CreditCard, RefreshCw, Zap, Wrench } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { api } from '@/lib/api';
 
 const quickActions = [
+  { label: '⚡ Quick Bill', icon: Zap, color: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100', path: '/sales/quick' },
+  { label: '🛠️ Service Bill', icon: Wrench, color: 'bg-teal-50 text-teal-600 hover:bg-teal-100', path: '/sales/service' },
   { label: 'New Sale', icon: FileText, color: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100', path: '/sales/new' },
   { label: 'New Purchase', icon: ShoppingCart, color: 'bg-purple-50 text-purple-600 hover:bg-purple-100', path: '/purchases/new' },
   { label: 'Add Item', icon: Package, color: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100', path: '/items/new' },
@@ -19,14 +20,72 @@ const quickActions = [
   { label: 'Payment', icon: CreditCard, color: 'bg-blue-50 text-blue-600 hover:bg-blue-100', path: '/payments/receive' },
 ];
 
+const initialStatCards = [
+  {
+    label: "Today's Sales",
+    value: 0,
+    change: 0,
+    positive: true,
+    colorClass: 'text-indigo-600',
+    bgClass: 'bg-indigo-50',
+    iconName: 'TrendingUp',
+  },
+  {
+    label: "Today's Purchase",
+    value: 0,
+    change: 0,
+    positive: false,
+    colorClass: 'text-purple-600',
+    bgClass: 'bg-purple-50',
+    iconName: 'ShoppingCart',
+  },
+  {
+    label: 'Gross Profit',
+    value: 0,
+    change: 0,
+    positive: true,
+    colorClass: 'text-emerald-600',
+    bgClass: 'bg-emerald-50',
+    iconName: 'BarChart2',
+  },
+  {
+    label: 'Cash in Hand',
+    value: 0,
+    change: 0,
+    positive: true,
+    colorClass: 'text-amber-600',
+    bgClass: 'bg-amber-50',
+    iconName: 'Wallet',
+  },
+  {
+    label: 'Receivables',
+    value: 0,
+    change: 0,
+    positive: true,
+    colorClass: 'text-blue-600',
+    bgClass: 'bg-blue-50',
+    iconName: 'ArrowDownLeft',
+  },
+  {
+    label: 'Payables',
+    value: 0,
+    change: 0,
+    positive: false,
+    colorClass: 'text-rose-600',
+    bgClass: 'bg-rose-50',
+    iconName: 'ArrowUpRight',
+  },
+];
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { currentBusiness, isBackendConnected } = useAuthStore();
   const [loading, setLoading] = useState(false);
-  const [cards, setCards] = useState(defaultStatCards);
-  const [transactions, setTransactions] = useState(defaultTransactions);
-  const [lowStock, setLowStock] = useState(defaultLowStock);
-  const [topSelling, setTopSelling] = useState(defaultTopSelling);
+  const [cards, setCards] = useState(initialStatCards);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [lowStock, setLowStock] = useState<any[]>([]);
+  const [topSelling, setTopSelling] = useState<any[]>([]);
+  const [salesChart, setSalesChart] = useState<MonthlyTrend[]>([]);
 
   const fetchSummary = async () => {
     if (!currentBusiness?.id) return;
@@ -34,12 +93,12 @@ export default function Dashboard() {
     try {
       const res = await api.get(`/businesses/${currentBusiness.id}/dashboard/summary`);
       if (res.success && res.data) {
-        const m = res.data.metrics;
+        const m = res.data.metrics || {};
         setCards([
           {
             label: "Today's Sales",
-            value: m.todaySales,
-            change: 12.4,
+            value: m.todaySales ?? 0,
+            change: 0,
             positive: true,
             colorClass: 'text-indigo-600',
             bgClass: 'bg-indigo-50',
@@ -47,8 +106,8 @@ export default function Dashboard() {
           },
           {
             label: "Today's Purchase",
-            value: m.todayPurchases,
-            change: -4.2,
+            value: m.todayPurchases ?? 0,
+            change: 0,
             positive: false,
             colorClass: 'text-purple-600',
             bgClass: 'bg-purple-50',
@@ -56,8 +115,8 @@ export default function Dashboard() {
           },
           {
             label: 'Gross Profit',
-            value: m.grossProfit,
-            change: 8.7,
+            value: m.grossProfit ?? 0,
+            change: 0,
             positive: true,
             colorClass: 'text-emerald-600',
             bgClass: 'bg-emerald-50',
@@ -65,8 +124,8 @@ export default function Dashboard() {
           },
           {
             label: 'Cash in Hand',
-            value: m.cashInHand,
-            change: 2.1,
+            value: m.cashInHand ?? 0,
+            change: 0,
             positive: true,
             colorClass: 'text-amber-600',
             bgClass: 'bg-amber-50',
@@ -74,8 +133,8 @@ export default function Dashboard() {
           },
           {
             label: 'Receivables',
-            value: m.receivables,
-            change: 5.3,
+            value: m.receivables ?? 0,
+            change: 0,
             positive: true,
             colorClass: 'text-blue-600',
             bgClass: 'bg-blue-50',
@@ -83,8 +142,8 @@ export default function Dashboard() {
           },
           {
             label: 'Payables',
-            value: m.payables,
-            change: -1.8,
+            value: m.payables ?? 0,
+            change: 0,
             positive: false,
             colorClass: 'text-rose-600',
             bgClass: 'bg-rose-50',
@@ -95,6 +154,7 @@ export default function Dashboard() {
         setTransactions(res.data.recentTransactions || []);
         setLowStock(res.data.lowStockItems || []);
         setTopSelling(res.data.topSellingItems || []);
+        setSalesChart(res.data.salesChart || []);
       }
     } catch (e) {
       console.error('Failed to load dashboard metrics from backend', e);
@@ -105,6 +165,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (currentBusiness?.id) {
+      // Clear previous metrics so data from a different shop is never shown
+      setCards(initialStatCards);
+      setTransactions([]);
+      setLowStock([]);
+      setTopSelling([]);
+      setSalesChart([]);
       fetchSummary();
     }
   }, [currentBusiness?.id]);
@@ -139,7 +205,7 @@ export default function Dashboard() {
         <div className="text-right hidden sm:block">
           <p className="text-xs text-slate-400">Active Business</p>
           <p className="text-sm font-semibold text-slate-700">
-            {currentBusiness?.name || 'Sharma Electronics Pvt. Ltd.'}
+            {currentBusiness?.name || 'My Shop'}
           </p>
         </div>
       </div>
@@ -172,7 +238,7 @@ export default function Dashboard() {
       </div>
 
       {/* Chart */}
-      <SalesChart />
+      <SalesChart data={salesChart} loading={loading} />
 
       {/* Bottom grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

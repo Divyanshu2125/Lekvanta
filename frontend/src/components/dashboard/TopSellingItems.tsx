@@ -1,4 +1,3 @@
-import { topSellingItems as defaultTopSelling } from '@/lib/data';
 import { formatCurrency } from '@/lib/utils';
 import { TrendingUp, TrendingDown, ArrowUpRight } from 'lucide-react';
 
@@ -11,7 +10,7 @@ interface TopSellingItem {
 }
 
 export default function TopSellingItems({
-  items = defaultTopSelling,
+  items = [],
 }: {
   items?: TopSellingItem[];
 }) {
