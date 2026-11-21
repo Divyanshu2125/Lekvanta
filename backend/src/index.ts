@@ -11,18 +11,16 @@ import prisma, { getDbHost, sanitizeDbUrl } from './services/prisma';
 
 const app = express();
 
-// Middlewares - Allow requests from localhost, frontend dev server, and electron
+// Middlewares - Allow requests from localhost, frontend dev server, electron, and deployed Vercel domains
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow localhost, null origin (file:// in electron), and dev frontend
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('app://') || origin === 'null') {
-        callback(null, true);
-      } else {
-        callback(null, true); // Permissive for local desktop mode
-      }
+      // Allow all valid origins while supporting credentials
+      callback(null, origin || true);
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 app.use(express.json({ limit: '50mb' }));
@@ -55,28 +53,30 @@ app.get('*', (req, res, next) => {
 // Centralized Error Handler
 app.use(errorHandler);
 
-const server = app.listen(env.PORT, '127.0.0.1', async () => {
-  const host = getDbHost(process.env.DATABASE_URL);
-  console.log(`🚀 Lekvanta Backend running on http://127.0.0.1:${env.PORT}`);
-  console.log(`🗄️  Database Target: PostgreSQL (${host})`);
-  console.log(`🩺 Health check available at http://127.0.0.1:${env.PORT}/api/health`);
+if (!process.env.VERCEL) {
+  const server = app.listen(env.PORT, '127.0.0.1', async () => {
+    const host = getDbHost(process.env.DATABASE_URL);
+    console.log(`🚀 Lekvanta Backend running on http://127.0.0.1:${env.PORT}`);
+    console.log(`🗄️  Database Target: PostgreSQL (${host})`);
+    console.log(`🩺 Health check available at http://127.0.0.1:${env.PORT}/api/health`);
 
-  try {
-    await prisma.$connect();
-    console.log(`✅ Successfully connected to Neon PostgreSQL database via Prisma`);
-  } catch (error: any) {
-    console.warn(`⚠️  Database connection pending or not yet reachable at ${host}.`);
-    console.warn(`   Configure your valid Neon DATABASE_URL with ?sslmode=require in backend/.env to connect.`);
-  }
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(async () => {
-    await prisma.$disconnect();
-    console.log('HTTP server closed & Prisma disconnected');
+    try {
+      await prisma.$connect();
+      console.log(`✅ Successfully connected to Neon PostgreSQL database via Prisma`);
+    } catch (error: any) {
+      console.warn(`⚠️  Database connection pending or not yet reachable at ${host}.`);
+      console.warn(`   Configure your valid Neon DATABASE_URL with ?sslmode=require in backend/.env to connect.`);
+    }
   });
-});
+
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM signal received: closing HTTP server');
+    server.close(async () => {
+      await prisma.$disconnect();
+      console.log('HTTP server closed & Prisma disconnected');
+    });
+  });
+}
 
 export default app;

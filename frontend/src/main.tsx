@@ -4,8 +4,11 @@ import { AuthProvider } from '@descope/react-sdk';
 import './index.css';
 import App from './App.tsx';
 
+const rawProjectId = import.meta.env.VITE_DESCOPE_PROJECT_ID?.trim();
 const descopeProjectId =
-  import.meta.env.VITE_DESCOPE_PROJECT_ID || 'P3MHZdzcXDlJn2gOSo59IpPaIGJn';
+  rawProjectId && rawProjectId !== 'undefined' && rawProjectId !== 'null'
+    ? rawProjectId
+    : 'P3MHZdzcXDlJn2gOSo59IpPaIGJn';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

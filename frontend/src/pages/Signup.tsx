@@ -48,7 +48,11 @@ export default function Signup() {
   const { signup, descopeLogin } = useAuthStore();
 
   const [signupMode, setSignupMode] = useState<'descope' | 'manual'>('descope');
-  const flowId = 'sign-up';
+  const rawFlowId = (import.meta.env.VITE_DESCOPE_FLOW_ID as string | undefined)?.trim();
+  const flowId =
+    rawFlowId && rawFlowId !== 'undefined' && rawFlowId !== 'null'
+      ? rawFlowId
+      : 'sign-up-or-in';
 
   const [formData, setFormData] = useState({
     ownerName: '',
@@ -92,7 +96,7 @@ export default function Signup() {
     setError(
       err?.detail?.errorMessage ||
       err?.message ||
-      'Authentication error occurred. Please try again.'
+      'Descope authentication flow could not be loaded. Switch to "Custom Shop Setup" above to create your shop account directly.'
     );
   };
 

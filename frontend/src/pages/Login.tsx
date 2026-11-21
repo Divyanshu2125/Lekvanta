@@ -29,7 +29,11 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
-  const flowId = import.meta.env.VITE_DESCOPE_FLOW_ID || 'sign-in';
+  const rawFlowId = (import.meta.env.VITE_DESCOPE_FLOW_ID as string | undefined)?.trim();
+  const flowId =
+    rawFlowId && rawFlowId !== 'undefined' && rawFlowId !== 'null'
+      ? rawFlowId
+      : 'sign-up-or-in';
   const isSessionExpired = new URLSearchParams(location.search).get('expired') === '1';
 
   // Handle successful authentication from Descope Flow
@@ -59,7 +63,7 @@ export default function Login() {
     setError(
       err?.detail?.errorMessage ||
       err?.message ||
-      'Authentication error occurred. Please try again.'
+      'Descope authentication flow could not be loaded. Please ensure your Vercel domain is added to Descope Allowed Origins, or use Password sign-in below.'
     );
   };
 

@@ -1,5 +1,8 @@
+const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 const API_BASE =
-  typeof window !== 'undefined' && window.location.protocol.startsWith('http')
+  rawApiUrl && rawApiUrl !== 'undefined' && rawApiUrl !== 'null'
+    ? rawApiUrl.replace(/\/$/, '')
+    : typeof window !== 'undefined' && window.location.protocol.startsWith('http')
     ? '/api'
     : 'http://127.0.0.1:4000/api';
 
